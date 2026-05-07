@@ -106,6 +106,40 @@ make test-cpu_sys_256x182_mem_wrap TEST=mem_sdp_test
 make regress-b2b TX_COUNT=200
 ```
 
+### 📦 非 B2B 单 DUT 例化 (Feature 5)
+
+即使不做 A/B 对比，也可通过脚本自动生成 `sram_instance.sv`，解析端口、连接 mem_if。
+
+```bash
+# 从任意 SRAM RTL 生成 sram_instance.sv
+python3 scripts/gen_sram_wrapper.py instance rtl/my_sram.sv
+
+# 指定输出模块名
+python3 scripts/gen_sram_wrapper.py instance rtl/my_sram.sv --name my_dut
+
+# 通过 Makefile
+make gen-instance SRAM_FILE=rtl/dut_sram.sv INST_NAME=my_sram
+```
+
+生成的 `sram_instance.sv` 直接在 tb_top 中例化，替代 `ifdef DUT_ORI` 的手动连线：
+
+```systemverilog
+// 在 tb_top 中，一行替换原来的 DUT 例化：
+sram_instance #(ADDR_WIDTH, DATA_WIDTH) u_dut (
+    .clk(clk), .rst_n(rst_n),
+    .cmd_a(vif.cmd_a), .addr_a(vif.addr_a),
+    .wdata_a(vif.wdata_a), .wem_a(vif.wem_a),
+    .rdata_a(vif.rdata_a_ori),
+    .cmd_b(vif.cmd_b), .addr_b(vif.addr_b),
+    .wdata_b(vif.wdata_b), .wem_b(vif.wem_b),
+    .rdata_b(vif.rdata_b_ori)
+);
+```
+
+- 自动检测单端口/双端口
+- 自动适配不同端口命名（`cena`, `din_a`, `q_a` 等别名）
+- 无需手写 interface 连线
+
 #### 自动接口扫描与连线
 
 脚本会解析 Verilog module 的端口列表，自动匹配标准接口信号，支持多种命名别名：
@@ -233,6 +267,7 @@ make build-unified DUT_ORI=dut_sram DUT_NEW=dut_sram_v2
 | `make build / run` | 分步编译/运行 |
 | `make all JITTER=1` | 带时钟抖动 |
 | `make gen-b2b` | 从 YAML 生成 B2B 文件 |
+| `make gen-instance` | 生成 sram_instance.sv (非B2B) |
 | `make test-<name>` | 对特定 SRAM 实例测试 |
 | `make regress-b2b` | B2B 全实例回归 |
 | `make sweep` | 一次遍历 6 种配置 |

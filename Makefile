@@ -237,6 +237,18 @@ regress-multi-report: regress-multi
 	$(MAKE) analyze-md
 
 # ================================================================
+# SRAM Instance Generator (non-B2B, single DUT)
+# ================================================================
+.PHONY: gen-instance
+
+gen-instance:
+	@echo "==> Generating sram_instance.sv from $(SRAM_FILE)..."
+	python3 scripts/gen_sram_wrapper.py instance $(SRAM_FILE) -o gen $(if $(INST_NAME),-n $(INST_NAME),)
+
+# Example: make gen-instance SRAM_FILE=rtl/dut_sram.sv INST_NAME=my_sram
+# Example: make gen-instance SRAM_FILE=rtl/orig/cpu_sys_256x182_mem_wrap.sv
+
+# ================================================================
 # Common
 # ================================================================
 .PHONY: wave clean

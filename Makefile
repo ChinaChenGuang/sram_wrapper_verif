@@ -39,9 +39,10 @@ SRC_MULTI   = $(SRC_COMMON) \
               ./verif_env/tb/sram_test_env.sv \
               ./verif_env/tb/tb_top_multi.sv
 
-SRC_UNIFIED = $(SRC_COMMON) \
+SRC_FEATURE = $(SRC_COMMON) \
               $(DUT_SRCS) \
-              ./verif_env/tb/tb_top_unified.sv
+              ./rtl/sram_ref_model.sv \
+              ./verif_env/tb/tb_top_feature.sv
 
 # Verilator flags
 VFLAGS_BASE = --binary --main --timing -j 4 --trace-fst --assert \
@@ -146,6 +147,29 @@ run-unified:
 sweep: clean build-unified
 	@echo "==> [Unified] Config Sweep: 6 configs in 1 simulation"
 	cd $(RUN_DIR) && ./Vtb_top +TEST=mem_sweep_all +TX_COUNT=30
+
+# ================================================================
+# Feature Verification Targets (方案 C: Ref Model + 3-way check)
+# ================================================================
+.PHONY: build-feature run-feature regress-feature
+
+build-feature:
+	@echo "==> [Feature] Ref Model + A/B + Func Check  ORI=$(DUT_ORI) NEW=$(DUT_NEW)"
+	mkdir -p $(RUN_DIR)
+	$(SIM) $(VFLAGS_BASE) $(DUT_DEFINES) $(SRC_FEATURE) \
+		--top-module tb_top --Mdir $(RUN_DIR)
+
+run-feature:
+	@echo "==> [Feature] Test: $(TEST) cfg: $(ADDR_WIDTH)x$(DATA_WIDTH)"
+	cd $(RUN_DIR) && ./Vtb_top +TEST=$(TEST) \
+		+ADDR_WIDTH=$(ADDR_WIDTH) +DATA_WIDTH=$(DATA_WIDTH) +TX_COUNT=$(TX_COUNT)
+
+# 全部 feature 测试一次跑完
+regress-feature: clean build-feature
+	@echo "===== Feature Regression ====="
+	cd $(RUN_DIR) && ./Vtb_top +TEST=mem_feature_all \
+		+ADDR_WIDTH=$(ADDR_WIDTH) +DATA_WIDTH=$(DATA_WIDTH) +TX_COUNT=100 2>&1 \
+		| grep -E "FEATURE|ERROR|Done"
 
 # ================================================================
 # All configs quick sweep (single test across all configs)

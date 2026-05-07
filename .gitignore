@@ -1,5 +1,6 @@
 # Build artifacts
 run_dir/
+gen/
 *.o
 *.a
 *.gch

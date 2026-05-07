@@ -26,11 +26,16 @@
 - 支持 SP / SDP / TDP 三种 SRAM 模式
 - 无需 UVM，纯 SystemVerilog + Verilator
 
+---
+
 ## 快速开始
 
 ```bash
 # 编译 + 运行默认测试 (SDP, 1K×32)
 make all
+
+# 带时钟抖动运行 (Feature 1)
+make all JITTER=1
 
 # 运行指定测试
 make run TEST=mem_sp_test
@@ -41,6 +46,112 @@ make run TEST=mem_wem_walking_test
 make wave
 ```
 
+---
+
+## 核心功能
+
+### 🕐 时钟抖动 (Feature 1)
+
+可参数化的时钟发生器，支持均匀/高斯随机抖动，运行时控制。
+
+```bash
+# 启用抖动 (默认 ±5% uniform)
+make all JITTER=1
+
+# 关闭抖动 → 理想时钟
+make all JITTER=0
+
+# 精细控制 (仿真时 plusargs)
+cd run_dir && ./Vtb_top \
+    +CLK_JITTER_EN=1 \
+    +CLK_JITTER_PCT=5 \
+    +CLK_JITTER_MODE=gaussian
+```
+
+### 🔄 B2B 自动化 — 解决同名 Module 冲突 (Feature 2 & 3)
+
+当 Original 和 Replacement SRAM 的 module name **完全相同**（如 `cpu_sys_256x182_mem_wrap`）时，自动处理文件复制、module 重命名、接口连线。
+
+#### 声明式配置
+
+```yaml
+# sram_instances.yaml
+instances:
+  - name: cpu_sys_256x182_mem_wrap
+    module_name: cpu_sys_256x182_mem_wrap   # orig 和 new 同名
+    orig_path: rtl/orig/cpu_sys_256x182_mem_wrap.sv
+    new_path: rtl/new/cpu_sys_256x182_mem_wrap.sv
+    addr_width: 8
+    data_width: 182
+    enabled: true
+```
+
+#### 工作流
+
+```bash
+# 方式 1: 从 YAML 生成 (手动配置)
+vim sram_instances.yaml        # 编辑你的 SRAM 列表
+make gen-b2b                   # 生成 gen/*_ori.sv, gen/*_new.sv
+
+# 方式 2: 自动扫描目录 (无需手写 YAML)
+python3 scripts/gen_sram_wrapper.py scan --orig rtl/orig --new rtl/new --gen-yaml
+
+# 方式 3: 一键全流程 (scan + wrap + B2B)
+python3 scripts/gen_sram_wrapper.py full --orig rtl/orig --new rtl/new
+
+# 对单个 SRAM 实例测试
+make test-cpu_sys_256x182_mem_wrap TEST=mem_sdp_test
+
+# 对全部 enabled 实例回归
+make regress-b2b TX_COUNT=200
+```
+
+#### 自动接口扫描与连线
+
+脚本会解析 Verilog module 的端口列表，自动匹配标准接口信号，支持多种命名别名：
+
+| 标准信号 | 识别的别名 |
+|----------|-----------|
+| `cmd_a` | `cena`, `ce_a`, `cs_a`, `chip_en_a` |
+| `wdata_a` | `din_a`, `d_a`, `data_in_a` |
+| `rdata_a` | `dout_a`, `q_a`, `data_out_a` |
+| `wem_a` | `we_a`, `bweb_a`, `bw_a`, `write_mask_a` |
+| ... | ... |
+
+生成的 wrapper 自动处理：
+- 端口名称映射
+- 位宽适配 (参数化连线)
+- 未连接端口自动 tie-off
+
+### 📊 日志分析 (Feature 4)
+
+解析仿真 log，提取测试结果、SVA 错误详情，生成多格式报告。
+
+```bash
+# 快速概要
+make analyze-logs
+
+# 生成 Markdown 报告
+make analyze-md
+# → run_dir/regress_report.md
+
+# 生成 JSON 报告 (便于 CI 集成)
+make analyze-json
+# → run_dir/regress_report.json
+
+# 回归 + 自动生成报告
+make regress-report        # 单配置回归 + 报告
+make regress-multi-report  # 多配置回归 + 报告
+```
+
+报告内容：
+- ✅/❌ 统计、通过率
+- SVA 错误详情 (ori/new 值逐行对比)
+- 仿真时间、Transaction 计数
+- Per-configuration 分项统计
+
+---
+
 ## 三种 Testbench 方案
 
 | 方案 | 文件 | 特点 |
@@ -48,6 +159,7 @@ make wave
 | **Simple** | `tb_top_simple.sv` | 单配置，编译时固定 ADDR_WIDTH/DATA_WIDTH |
 | **Multi (方案A)** | `tb_top_multi.sv` | generate 6 组不同配置，一次编译全部测试 |
 | **Unified (方案B)** | `tb_top_unified.sv` | 最大位宽 + Mask，运行时动态切换配置 |
+| **Feature (方案C)** | `tb_top_feature.sv` | Ref Model + 3-way 检查 (ori/new/ref) |
 
 ### 方案 A — 多配置 Generate
 
@@ -64,19 +176,20 @@ make regress-multi                        # 全回归 (30 cases)
 make build-unified                        # 编译 (1 组最大位宽 DUT)
 make run-unified ADDR_WIDTH=8  DATA_WIDTH=8   TEST=mem_sp_test
 make run-unified ADDR_WIDTH=12 DATA_WIDTH=64  TEST=mem_tdp_test
-make run-unified ADDR_WIDTH=16 DATA_WIDTH=8   TEST=mem_b2b_raw_test
 
 # 一次仿真遍历全部 6 种配置
 make sweep
 ```
 
-### Different DUT Modules
+### 不同 DUT 模块
 
 ```bash
 # ori 和 new 使用不同模块
 make all DUT_ORI=dut_sram DUT_NEW=dut_sram_v2
 make build-unified DUT_ORI=dut_sram DUT_NEW=dut_sram_v2
 ```
+
+---
 
 ## 测试用例
 
@@ -87,7 +200,17 @@ make build-unified DUT_ORI=dut_sram DUT_NEW=dut_sram_v2
 | `mem_tdp_test` | 真双端口随机 |
 | `mem_wem_walking_test` | 写掩码走马灯 |
 | `mem_b2b_raw_test` | 同址背靠背 RAW |
+| `mem_fill_verify` | 写满全部地址再逐一读回 |
+| `mem_data_pattern` | 全0/全1/棋盘/走马灯数据模式 |
+| `mem_wem_mask` | 写掩码 byte/bit/随机验证 |
+| `mem_addr_boundary` | 边界地址测试 |
+| `mem_waw` / `mem_war` | 写后写 / 写后读冒险 |
+| `mem_dual_conflict` | 双端口冲突场景 |
+| `mem_reset` | 复位行为验证 |
+| `mem_stress` | 随机 Hammer 压力测试 |
 | `mem_sweep_all` | 遍历全部 6 种配置 (仅方案 B) |
+
+---
 
 ## 内置 SRAM 配置
 
@@ -100,33 +223,67 @@ make build-unified DUT_ORI=dut_sram DUT_NEW=dut_sram_v2
 | — | 64K×8 | 65536 | 8 | 512Kb |
 | — | 512×128 | 512 | 128 | 64Kb |
 
+---
+
+## Makefile 命令速查
+
+| 命令 | 说明 |
+|------|------|
+| `make all` | 编译 + 运行默认测试 |
+| `make build / run` | 分步编译/运行 |
+| `make all JITTER=1` | 带时钟抖动 |
+| `make gen-b2b` | 从 YAML 生成 B2B 文件 |
+| `make test-<name>` | 对特定 SRAM 实例测试 |
+| `make regress-b2b` | B2B 全实例回归 |
+| `make sweep` | 一次遍历 6 种配置 |
+| `make analyze-md` | 生成 Markdown 日志报告 |
+| `make regress-report` | 回归 + 生成报告 |
+| `make wave` | 打开波形 |
+| `make clean` | 清理 |
+
+---
+
 ## 项目结构
 
 ```
 ├── rtl/
-│   ├── dut_sram.sv           # DUT (旧版)
-│   ├── dut_sram_v2.sv        # DUT (新版, 演示不同模块名)
-│   ├── dut_wrapper.sv        # DUT 选择包装器
-│   └── sram_cfg_pkg.sv       # 配置定义包
+│   ├── clk_gen.sv               # 时钟发生器 (含抖动)
+│   ├── dut_sram.sv               # DUT (旧版)
+│   ├── dut_sram_v2.sv            # DUT (新版, 演示不同模块名)
+│   ├── dut_wrapper.sv            # DUT 选择包装器
+│   ├── sram_cfg_pkg.sv           # 配置定义包
+│   ├── sram_ref_model.sv         # 黄金参考模型
+│   ├── orig/                     # 原始 SRAM (同名 module 示例)
+│   └── new/                      # 替换 SRAM (同名 module 示例)
 ├── verif_env/
-│   ├── tb/
-│   │   ├── mem_if.sv         # 统一参数化接口
-│   │   ├── mem_sva_checker.sv # SVA 比对模块
-│   │   ├── sram_test_env.sv  # 参数化测试环境
-│   │   ├── tb_top_simple.sv  # 方案: 单配置
-│   │   ├── tb_top_multi.sv   # 方案 A: 多配置 generate
-│   │   └── tb_top_unified.sv # 方案 B: 统一+Mask
-│   ├── tests/                # UVM 测试 (需商业仿真器)
-│   └── uvc/                  # UVM 组件 (需商业仿真器)
-├── scripts/                  # 回归脚本
-├── docs/                     # 文档
+│   └── tb/
+│       ├── mem_if.sv             # 统一参数化接口
+│       ├── mem_sva_checker.sv    # SVA 比对模块
+│       ├── sram_test_env.sv      # 参数化测试环境
+│       ├── tb_top_simple.sv      # 方案: 单配置
+│       ├── tb_top_multi.sv       # 方案 A: 多配置 generate
+│       ├── tb_top_unified.sv     # 方案 B: 统一+Mask
+│       └── tb_top_feature.sv     # 方案 C: Ref Model 3-way check
+├── scripts/
+│   ├── gen_sram_b2b.py           # B2B 文件生成器 (YAML → _ori/_new.sv)
+│   ├── gen_sram_wrapper.py       # Wrapper 生成器 (scan/wrap/full)
+│   ├── analyze_logs.py           # 日志分析器 (text/md/json)
+│   ├── run_tests.sh              # 单配置回归脚本
+│   └── run_multi_regress.sh      # 多配置回归脚本
+├── gen/                          # 自动生成文件 (已 gitignore)
+├── docs/                         # 文档
+├── sram_instances.yaml           # SRAM 实例配置
 ├── Makefile
-└── GEMINI.md                 # AI 辅助开发指引
+└── GEMINI.md                     # AI 辅助开发指引
 ```
+
+---
 
 ## 依赖
 
 - **Verilator 5.x** (`sudo apt install verilator`)
+- **Python 3.8+** (用于自动化脚本)
+- **PyYAML** (`pip3 install pyyaml`)
 - **GTKWave** (波形查看, 可选)
 
 ## License

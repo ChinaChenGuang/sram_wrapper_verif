@@ -16,18 +16,26 @@ ADDR_WIDTH   ?= 10
 DATA_WIDTH   ?= 32
 DUT_ORI      ?= dut_sram     # Original DUT module name
 DUT_NEW      ?= dut_sram     # New DUT module name (same or different)
+JITTER       ?= 1            # 1=enable clock jitter (±5%), 0=disable
 WAVE_FILE    ?= dump.fst
 RUN_DIR      ?= run_dir
 
 # DUT module sources (add new DUT modules here)
-DUT_SRCS     = ./rtl/dut_sram.sv
-DUT_SRCS    += ./rtl/dut_sram_v2.sv   # alternative "new" DUT
+# If gen/sram_b2b_list.mk exists, it will override these defaults
+DUT_SRCS     ?= ./rtl/dut_sram.sv
+DUT_SRCS     += ./rtl/dut_sram_v2.sv   # alternative "new" DUT
 
 # Pass DUT module names as Verilator defines
 DUT_DEFINES  = +define+DUT_ORI=$(DUT_ORI) +define+DUT_NEW=$(DUT_NEW)
 
+# ================================================================
+# Include B2B generated targets (if generated)
+# ================================================================
+-include gen/sram_b2b_list.mk
+
 # Sources
-SRC_COMMON  = ./verif_env/tb/mem_if.sv
+SRC_COMMON  = ./verif_env/tb/mem_if.sv \
+              ./rtl/clk_gen.sv
 SRC_SIMPLE  = $(SRC_COMMON) \
               ./verif_env/tb/mem_sva_checker.sv \
               $(DUT_SRCS) \
@@ -44,10 +52,13 @@ SRC_FEATURE = $(SRC_COMMON) \
               ./rtl/sram_ref_model.sv \
               ./verif_env/tb/tb_top_feature.sv
 
+# Clock jitter: 1=enable, 0=ideal clock
+CLK_FLAGS    = $(if $(filter 1,$(JITTER)),+define+USE_CLK_GEN,)
+
 # Verilator flags
 VFLAGS_BASE = --binary --main --timing -j 4 --trace-fst --assert \
               -Wno-fatal -Wno-lint -Wno-style -Wno-SYMRSVDWORD -Wno-IGNOREDRETURN \
-              +incdir+./verif_env/tb
+              +incdir+./verif_env/tb $(CLK_FLAGS)
 
 # ================================================================
 # Single-Config Targets (default)
@@ -183,6 +194,47 @@ sweep-configs:
 		echo "--- $$3 ---"; \
 		$(MAKE) clean build run ADDR_WIDTH=$$1 DATA_WIDTH=$$2 TEST=$(TEST) TX_COUNT=50 2>&1 | grep -E "PASS|FAIL|ERROR|SVA"; \
 	done
+
+# ================================================================
+# SRAM B2B Generator
+# ================================================================
+.PHONY: gen-b2b
+
+gen-b2b:
+	@echo "==> Generating B2B SRAM files from sram_instances.yaml..."
+	python3 scripts/gen_sram_b2b.py
+
+# Force regenerate (ignore cache)
+gen-b2b-force:
+	@echo "==> Force regenerating B2B SRAM files..."
+	rm -rf gen/
+	python3 scripts/gen_sram_b2b.py
+
+# ================================================================
+# Log Analysis
+# ================================================================
+.PHONY: analyze-logs analyze-md analyze-json
+
+analyze-logs:
+	@echo "==> Analyzing simulation logs..."
+	python3 scripts/analyze_logs.py $(RUN_DIR)/logs/ --summary
+
+analyze-md:
+	@echo "==> Generating Markdown report..."
+	python3 scripts/analyze_logs.py $(RUN_DIR)/logs/ --report md -o $(RUN_DIR)/regress_report.md
+	@echo "Report: $(RUN_DIR)/regress_report.md"
+
+analyze-json:
+	@echo "==> Generating JSON report..."
+	python3 scripts/analyze_logs.py $(RUN_DIR)/logs/ --report json -o $(RUN_DIR)/regress_report.json
+	@echo "Report: $(RUN_DIR)/regress_report.json"
+
+# Regression + auto-analyze
+regress-report: regress
+	$(MAKE) analyze-md
+
+regress-multi-report: regress-multi
+	$(MAKE) analyze-md
 
 # ================================================================
 # Common

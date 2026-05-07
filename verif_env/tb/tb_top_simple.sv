@@ -19,15 +19,28 @@ module tb_top;
     // Clock and Reset
     // ----------------------------------------------------------
     logic clk;
+    logic clk_stable;
     logic rst_n;
 
+`ifdef USE_CLK_GEN
+    // Use jitter-capable clock generator (default: 10ns period, ±5% jitter)
+    clk_gen #(.BASE_PERIOD_PS(10000)) u_clk_gen (
+        .clk        (clk),
+        .clk_stable (clk_stable)
+    );
+`else
+    // Ideal clock (no jitter)
     initial begin
         clk = 1'b0;
         forever #5 clk = ~clk;
     end
+    assign clk_stable = 1'b1;  // always stable
+`endif
 
     initial begin
         rst_n = 1'b0;
+        @(posedge clk_stable);
+        repeat (2) @(posedge clk);
         #20 rst_n = 1'b1;
     end
 

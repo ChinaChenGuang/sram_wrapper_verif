@@ -245,8 +245,22 @@ gen-instance:
 	@echo "==> Generating sram_instance.sv from $(SRAM_FILE)..."
 	python3 scripts/gen_sram_wrapper.py instance $(SRAM_FILE) -o gen $(if $(INST_NAME),-n $(INST_NAME),)
 
-# Example: make gen-instance SRAM_FILE=rtl/dut_sram.sv INST_NAME=my_sram
-# Example: make gen-instance SRAM_FILE=rtl/orig/cpu_sys_256x182_mem_wrap.sv
+# ================================================================
+# SRAM Connect Generator (`include snippet for tb_top)
+# ================================================================
+.PHONY: gen-connect gen-connect-pair
+
+gen-connect:
+	@echo "==> Generating `include snippet from $(SRAM_FILE)..."
+	python3 scripts/gen_sram_wrapper.py connect $(SRAM_FILE) \
+		--role $(ROLE) -O $(OUTPUT) -o gen $(if $(INST_NAME),--inst-name $(INST_NAME),)
+
+# Generate both ori and new connect files for B2B
+# Usage: make gen-connect-pair ORI_FILE=rtl/dut_sram.sv NEW_FILE=rtl/dut_sram_v2.sv
+gen-connect-pair:
+	@echo "==> Generating B2B connect pair..."
+	python3 scripts/gen_sram_wrapper.py connect $(ORI_FILE) --role ori -O dut_ori_connect -o gen
+	python3 scripts/gen_sram_wrapper.py connect $(NEW_FILE) --role new -O dut_new_connect -o gen
 
 # ================================================================
 # Common

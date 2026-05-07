@@ -108,37 +108,60 @@ make regress-b2b TX_COUNT=200
 
 ### 📦 非 B2B 单 DUT 例化 (Feature 5)
 
-即使不做 A/B 对比，也可通过脚本自动生成 `sram_instance.sv`，解析端口、连接 mem_if。
+即使不做 A/B 对比，也可通过脚本自动生成 `include 片段，解析端口、连接 mem_if。
+
+#### `connect` — 生成 `include 例化片段（推荐）
+
+生成的文件直接 `include` 到 tb_top 中，内部已是 SRAM 的硬连线例化：
 
 ```bash
-# 从任意 SRAM RTL 生成 sram_instance.sv
-python3 scripts/gen_sram_wrapper.py instance rtl/my_sram.sv
+# 单 DUT
+python3 scripts/gen_sram_wrapper.py connect rtl/dut_sram.sv --role ori -O dut_ori_connect
 
-# 指定输出模块名
-python3 scripts/gen_sram_wrapper.py instance rtl/my_sram.sv --name my_dut
+# B2B 双 DUT
+python3 scripts/gen_sram_wrapper.py connect rtl/dut_sram.sv     --role ori -O dut_ori_connect
+python3 scripts/gen_sram_wrapper.py connect rtl/dut_sram_v2.sv  --role new -O dut_new_connect
 
 # 通过 Makefile
-make gen-instance SRAM_FILE=rtl/dut_sram.sv INST_NAME=my_sram
+make gen-connect      SRAM_FILE=rtl/dut_sram.sv ROLE=ori OUTPUT=dut_connect
+make gen-connect-pair ORI_FILE=rtl/dut_sram.sv NEW_FILE=rtl/dut_sram_v2.sv
 ```
 
-生成的 `sram_instance.sv` 直接在 tb_top 中例化，替代 `ifdef DUT_ORI` 的手动连线：
-
+生成的 `dut_ori_connect.sv`：
 ```systemverilog
-// 在 tb_top 中，一行替换原来的 DUT 例化：
-sram_instance #(ADDR_WIDTH, DATA_WIDTH) u_dut (
-    .clk(clk), .rst_n(rst_n),
-    .cmd_a(vif.cmd_a), .addr_a(vif.addr_a),
-    .wdata_a(vif.wdata_a), .wem_a(vif.wem_a),
-    .rdata_a(vif.rdata_a_ori),
-    .cmd_b(vif.cmd_b), .addr_b(vif.addr_b),
-    .wdata_b(vif.wdata_b), .wem_b(vif.wem_b),
-    .rdata_b(vif.rdata_b_ori)
+// AUTO-GENERATED — `include in tb_top
+dut_sram #(
+    .ADDR_WIDTH (10),
+    .DATA_WIDTH (32)
+) u_dut_ori (
+    .clk   (clk),
+    .rst_n (rst_n),
+    .cmd_a (vif.cmd_a),
+    .addr_a (vif.addr_a),
+    .wdata_a (vif.wdata_a),
+    .wem_a (vif.wem_a),
+    .rdata_a (vif.rdata_a_ori),   // role=ori → _ori
+    .cmd_b (vif.cmd_b),
+    .addr_b (vif.addr_b),
+    .wdata_b (vif.wdata_b),
+    .wem_b (vif.wem_b),
+    .rdata_b (vif.rdata_b_ori)
 );
 ```
 
-- 自动检测单端口/双端口
-- 自动适配不同端口命名（`cena`, `din_a`, `q_a` 等别名）
-- 无需手写 interface 连线
+tb_top 中使用：
+```systemverilog
+// 替换原来的 ifdef DUT_ORI / DUT_NEW 整段
+`include "gen/dut_ori_connect.sv"
+`include "gen/dut_new_connect.sv"
+```
+
+#### `instance` — 生成 wrapper module
+
+```bash
+python3 scripts/gen_sram_wrapper.py instance rtl/my_sram.sv --name my_dut
+make gen-instance SRAM_FILE=rtl/dut_sram.sv INST_NAME=my_sram
+```
 
 #### 自动接口扫描与连线
 
@@ -267,7 +290,9 @@ make build-unified DUT_ORI=dut_sram DUT_NEW=dut_sram_v2
 | `make build / run` | 分步编译/运行 |
 | `make all JITTER=1` | 带时钟抖动 |
 | `make gen-b2b` | 从 YAML 生成 B2B 文件 |
-| `make gen-instance` | 生成 sram_instance.sv (非B2B) |
+| `make gen-connect` | 生成 `include DUT 例化片段 |
+| `make gen-connect-pair` | 生成 B2B 双 DUT connect 文件 |
+| `make gen-instance` | 生成 sram_instance wrapper module |
 | `make test-<name>` | 对特定 SRAM 实例测试 |
 | `make regress-b2b` | B2B 全实例回归 |
 | `make sweep` | 一次遍历 6 种配置 |

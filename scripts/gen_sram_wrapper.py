@@ -736,6 +736,156 @@ def cmd_instance(args):
 
 
 # ============================================================
+# Connect Generator: generate `include "dut_connect.sv" snippet
+# ============================================================
+
+def generate_connect(module: SramModule, port_map: Dict[str, SramPort],
+                     addr_width: int, data_width: int,
+                     instance_name: str, role: str = "ori") -> str:
+    """Generate a flat instantiation snippet that can be `include`d in tb_top.
+    
+    This generates raw Verilog instantiation that directly references
+    tb_top signals: clk, rst_n, vif.cmd_a, vif.rdata_a_ori, etc.
+    
+    Args:
+        role: 'ori' → rdata → vif.rdata_a_ori / vif.rdata_b_ori
+              'new' → rdata → vif.rdata_a_new / vif.rdata_b_new
+    """
+    has_b = 'cmd_b' in port_map
+    rdata_suffix = "_ori" if role == "ori" else "_new"
+
+    lines = []
+    lines.append("// ============================================================")
+    lines.append(f"// AUTO-GENERATED dut_connect snippet — `include in tb_top")
+    lines.append(f"// SRAM:   {module.name}")
+    lines.append(f"// Source: {module.filepath}")
+    lines.append(f"// Config: AW={addr_width} DW={data_width}")
+    lines.append(f"// Role:   {role} (rdata → vif.rdata_*{rdata_suffix})")
+    lines.append(f"// Port B: {'yes' if has_b else 'no'}")
+    lines.append("// ============================================================")
+    lines.append("")
+
+    # Module instantiation
+    lines.append(f"{module.name} #(")
+    lines.append(f"    .ADDR_WIDTH ({addr_width}),")
+    lines.append(f"    .DATA_WIDTH ({data_width})")
+    lines.append(f") {instance_name} (")
+
+    # Map standard ports to tb_top signals
+    connections = []
+
+    if 'clk' in port_map:
+        connections.append(f"    .{port_map['clk'].name}   (clk)")
+    if 'rst_n' in port_map:
+        connections.append(f"    .{port_map['rst_n'].name} (rst_n)")
+
+    port_a_signals = {
+        'cmd_a':   'vif.cmd_a',
+        'addr_a':  'vif.addr_a',
+        'wdata_a': 'vif.wdata_a',
+        'wem_a':   'vif.wem_a',
+        'rdata_a': f'vif.rdata_a{rdata_suffix}',
+    }
+    for std_name, tb_signal in port_a_signals.items():
+        if std_name in port_map:
+            actual = port_map[std_name]
+            connections.append(f"    .{actual.name} ({tb_signal})")
+
+    if has_b:
+        port_b_signals = {
+            'cmd_b':   'vif.cmd_b',
+            'addr_b':  'vif.addr_b',
+            'wdata_b': 'vif.wdata_b',
+            'wem_b':   'vif.wem_b',
+            'rdata_b': f'vif.rdata_b{rdata_suffix}',
+        }
+        for std_name, tb_signal in port_b_signals.items():
+            if std_name in port_map:
+                actual = port_map[std_name]
+                connections.append(f"    .{actual.name} ({tb_signal})")
+
+    # Tie-off unconnected ports
+    mapped_names = {port_map[k].name for k in port_map if k in port_map}
+    for port in module.ports:
+        if port.name not in mapped_names:
+            if port.direction == 'input':
+                connections.append(f"    .{port.name} (1'b0)  // unconnected")
+            else:
+                connections.append(f"    .{port.name} ()  // unconnected")
+
+    lines.append(",\n".join(connections))
+    lines.append(");")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def cmd_connect(args):
+    """Generate dut_connect.sv include snippet"""
+    filepath = Path(args.sram_file)
+    out_name = args.output or "dut_connect"
+    role = args.role or "ori"
+    inst_name = args.inst_name or ("u_dut_ori" if role == "ori" else "u_dut_new")
+
+    print("=" * 60)
+    print(f"SRAM Connect Generator (`include snippet)")
+    print(f"  Input:  {filepath}")
+    print(f"  Output: {out_name}.sv")
+    print(f"  Role:   {role} (instance: {inst_name})")
+    print("=" * 60)
+
+    module = VerilogParser.parse_file(filepath)
+    if not module:
+        print("ERROR: Failed to parse module"); sys.exit(1)
+
+    print(f"\n  Module: {module.name}")
+    print(f"  Params: {module.parameters}")
+
+    port_map = map_ports(module.ports)
+    has_b = 'cmd_b' in port_map
+
+    print(f"  Ports mapped: {len(port_map)}/{len(STANDARD_PORTS)}  |  Port B: {'YES' if has_b else 'NO'}")
+    for std_name, std_info in STANDARD_PORTS.items():
+        if std_name in port_map:
+            rdata_suffix = f'_ori/_new' if 'rdata' in std_name else ''
+            print(f"    ✓  {std_name:10s} -> {port_map[std_name].name:20s} -> vif.{std_name}{rdata_suffix}")
+        elif std_info['required']:
+            print(f"    ✗  {std_name:10s} -> NOT FOUND!")
+
+    aw = _extract_param(module.parameters, ['ADDR_WIDTH', 'ADDRW', 'AW', 'A_WIDTH'], args.addr_width or 10)
+    dw = _extract_param(module.parameters, ['DATA_WIDTH', 'DATAW', 'DW', 'D_WIDTH'], args.data_width or 32)
+
+    connect_sv = generate_connect(module, port_map, aw, dw, inst_name, role)
+
+    out_dir = Path(args.output_dir) if args.output_dir else Path("gen")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{out_name}.sv"
+    out_path.write_text(connect_sv, encoding="utf-8")
+
+    print(f"\n✓  Generated: {out_path}")
+
+    if args.show:
+        print(f"\n{'='*60}")
+        print(connect_sv)
+
+    # Show tb_top usage
+    print(f"\n{'='*60}")
+    print(f"tb_top usage:")
+    print(f"{'='*60}")
+    print(f"  In tb_top, replace the DUT instantiation block with:")
+    print(f"")
+    print(f"    `include \"{out_path}\"")
+    print(f"")
+    print(f"  Or for B2B mode with two DUTs:")
+    print(f"    `include \"gen/dut_ori_connect.sv\"")
+    print(f"    `include \"gen/dut_new_connect.sv\"")
+    print(f"")
+    print(f"  Build:")
+    print(f"    make build DUT_SRCS=\"{filepath}\"")
+    print(f"{'='*60}")
+
+
+# ============================================================
 # Main
 # ============================================================
 
@@ -758,22 +908,34 @@ def main():
     p.add_argument("--new", dest="new_dir", required=True)
     p.add_argument("-o", "--output-dir", dest="output_dir", default="gen")
 
-    p = sub.add_parser("instance", help="Generate sram_instance.sv for non-B2B single-DUT use")
+    p = sub.add_parser("instance", help="Generate sram_instance.sv wrapper module for non-B2B single-DUT use")
     p.add_argument("sram_file", help="Path to SRAM .sv file")
     p.add_argument("-n", "--name", dest="name", default="sram_instance",
                    help="Output module name (default: sram_instance)")
     p.add_argument("-o", "--output-dir", dest="output_dir", default="gen")
-    p.add_argument("--addr-width", dest="addr_width", type=int, default=None,
-                   help="Override ADDR_WIDTH (default: auto-detect from module)")
-    p.add_argument("--data-width", dest="data_width", type=int, default=None,
-                   help="Override DATA_WIDTH (default: auto-detect from module)")
-    p.add_argument("--show", action="store_true", help="Print generated code to stdout")
+    p.add_argument("--addr-width", dest="addr_width", type=int, default=None)
+    p.add_argument("--data-width", dest="data_width", type=int, default=None)
+    p.add_argument("--show", action="store_true")
+
+    p = sub.add_parser("connect", help="Generate dut_connect.sv `include snippet for tb_top")
+    p.add_argument("sram_file", help="Path to SRAM .sv file")
+    p.add_argument("--role", dest="role", choices=["ori", "new"], default="ori",
+                   help="DUT role: ori (rdata→_ori) or new (rdata→_new)")
+    p.add_argument("--output", "-O", dest="output", default="dut_connect",
+                   help="Output filename without .sv (default: dut_connect)")
+    p.add_argument("--inst-name", dest="inst_name", default=None,
+                   help="Instance name (default: u_dut_ori or u_dut_new)")
+    p.add_argument("--output-dir", "-o", dest="output_dir", default="gen")
+    p.add_argument("--addr-width", dest="addr_width", type=int, default=None)
+    p.add_argument("--data-width", dest="data_width", type=int, default=None)
+    p.add_argument("--show", action="store_true")
 
     args = parser.parse_args()
     if args.cmd == "scan": cmd_scan(args)
     elif args.cmd == "wrap": cmd_wrap(args)
     elif args.cmd == "full": cmd_full(args)
     elif args.cmd == "instance": cmd_instance(args)
+    elif args.cmd == "connect": cmd_connect(args)
     else: parser.print_help()
 
 

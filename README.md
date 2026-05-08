@@ -9,7 +9,7 @@
    +TEST=          │   Testbench  │
    +ADDR_WIDTH=    │  (tb_top_*)  │
    +DATA_WIDTH=    └──────┬──────┘
-                          │ 共享激励
+                          │ 共享激励 (vif.cmd, vif.addr, vif.wdata, vif.wem)
               ┌───────────┼───────────┐
               ▼           ▼           ▼
         ┌─────────┐ ┌─────────┐ ┌──────────┐
@@ -18,29 +18,23 @@
         └────┬────┘ └────┬────┘ └────┬─────┘
              │            │           │
              ▼            ▼           ▼
-        rdata_ori    rdata_new   rdata_ori === rdata_new ?
+        rdata_ori    rdata_new   assert(rdata_ori === rdata_new)
 ```
 
-- 两个 DUT 共享完全相同的随机激励
-- SVA 断言逐周期比对 `rdata_ori === rdata_new`
-- 支持 SP / SDP / TDP 三种 SRAM 模式
-- 无需 UVM，纯 SystemVerilog + Verilator
+- 两个 DUT 共享完全相同的随机激励，SVA 逐周期比对输出
+- 支持 **SP**（单端口）/ **SDP**（伪双端口）/ **TDP**（真双端口）/ **BitWrite** / **Multi-Bank**
+- 纯 SystemVerilog + Verilator，无需 UVM
 
 ---
 
 ## 快速开始
 
 ```bash
-# 编译 + 运行默认测试 (SDP, 1K×32)
+# 编译 + 运行默认测试
 make all
 
-# 带时钟抖动运行 (Feature 1)
+# 带时钟抖动 (±5%)
 make all JITTER=1
-
-# 运行指定测试
-make run TEST=mem_sp_test
-make run TEST=mem_b2b_raw_test
-make run TEST=mem_wem_walking_test
 
 # 查看波形
 make wave
@@ -48,208 +42,150 @@ make wave
 
 ---
 
-## 核心功能
+## B2B 批量处理（核心工作流）
 
-### 🕐 时钟抖动 (Feature 1)
-
-可参数化的时钟发生器，支持均匀/高斯随机抖动，运行时控制。
+当 orig 和 new SRAM 的 **module name 完全相同** 时，`make gen-b2b` 一条命令完成全部工作：
 
 ```bash
-# 启用抖动 (默认 ±5% uniform)
-make all JITTER=1
+# 1. 编辑配置文件，列出所有待测 SRAM
+vim sram_instances.yaml
 
-# 关闭抖动 → 理想时钟
-make all JITTER=0
+# 2. 一键生成：module 改名 + connect 片段 + 回归脚本
+make gen-b2b
 
-# 精细控制 (仿真时 plusargs)
-cd run_dir && ./Vtb_top \
-    +CLK_JITTER_EN=1 \
-    +CLK_JITTER_PCT=5 \
-    +CLK_JITTER_MODE=gaussian
+# 3. 对单个实例测试
+make test-sram_tdp TEST=mem_sdp_test
+
+# 4. 全量回归
+make regress-b2b TX_COUNT=200
+
+# 5. 分析结果
+make analyze-md
 ```
 
-### 🔄 B2B 批量处理 — 一键完成 module 改名 + 例化片段
-
-当 Original 和 Replacement SRAM 的 module name **完全相同**（如 `cpu_sys_256x182_mem_wrap`）时，`make gen-b2b` 一条命令完成全部工作：
+### 生成的文件结构
 
 ```
 sram_instances.yaml
         │
         ▼  make gen-b2b
         │
-        ├── gen/cpu_sram_ori.sv          (module cpu_sram → cpu_sram_ori)
-        ├── gen/cpu_sram_new.sv          (module cpu_sram → cpu_sram_new)
-        ├── gen/cpu_sram_ori_connect.sv  (`include 片段, rdata→_ori)
-        ├── gen/cpu_sram_new_connect.sv  (`include 片段, rdata→_new)
-        ├── gen/gpu_sram_ori.sv
-        ├── gen/gpu_sram_new.sv
-        ├── gen/gpu_sram_ori_connect.sv
-        ├── gen/gpu_sram_new_connect.sv
-        ├── gen/sram_b2b_list.mk         (Makefile 片段)
-        └── gen/regress_sram_b2b.sh      (回归脚本)
+        ├── gen/sram_tdp_ori.sv         (module sram_tdp → sram_tdp_ori)
+        ├── gen/sram_tdp_new.sv         (module sram_tdp → sram_tdp_new)
+        ├── gen/sram_tdp_connect.sv     (ori + new + checker 三合一)
+        ├── gen/sram_sp_ori.sv
+        ├── gen/sram_sp_new.sv
+        ├── gen/sram_sp_connect.sv
+        ├── gen/sram_b2b_list.mk        (Makefile 片段, 自动 include)
+        └── gen/regress_sram_b2b.sh     (回归脚本)
 ```
 
-#### tb_top 中使用
+### 统一 Connect 文件（ori + new + checker）
+
+每个 B2B 实例生成**一个** connect 文件，波形中并排可见：
 
 ```systemverilog
-// tb_top 中用 `include 替代原来的 ifdef DUT_ORI/DUT_NEW 块：
+// gen/sram_tdp_connect.sv — `include in tb_top
+
+// ── DUT Original ──
+sram_tdp_ori #(.ADDR_WIDTH(10), .DATA_WIDTH(32)) u_dut_ori (
+    .clk(clk), .rst_n(rst_n),
+    .cmd_a(vif.cmd_a), .addr_a(vif.addr_a), ...
+    .rdata_a(vif.rdata_a_ori), .rdata_b(vif.rdata_b_ori)
+);
+
+// ── DUT New ──
+sram_tdp_new #(.ADDR_WIDTH(10), .DATA_WIDTH(32)) u_dut_new (
+    .clk(clk), .rst_n(rst_n),
+    .cmd_a(vif.cmd_a), .addr_a(vif.addr_a), ...
+    .rdata_a(vif.rdata_a_new), .rdata_b(vif.rdata_b_new)
+);
+
+// ── SVA Checker ──
+mem_sva_checker #(.ADDR_WIDTH(10), .DATA_WIDTH(32), .READ_LATENCY(1))
+    u_sva_checker(vif);
+```
+
+tb_top 中一行搞定：
+
+```systemverilog
 `ifdef USE_CONNECT
-    `include "dut_ori_connect.sv"
-    `include "dut_new_connect.sv"
-`else
-    // ... legacy ifdef mode ...
+    `include "dut_connect.sv"   // ori + new + checker 全部
 `endif
 ```
 
-```bash
-# 一键生成所有 B2B 文件
-make gen-b2b
+切换实例时自动 symlink：`make test-sram_sp` → `gen/sram_sp_connect.sv` → `gen/dut_connect.sv`
 
-# 对单个实例测试（自动 symlink 正确的 connect 文件）
-make test-cpu_sys_256x182_mem_wrap TEST=mem_sdp_test
+### YAML 配置格式
 
-# 全量回归
-make regress-b2b TX_COUNT=200
+```yaml
+instances:
+  - name: sram_tdp              # 唯一标识
+    module_name: sram_tdp       # Verilog module name (orig/new 同名)
+    orig_path: rtl/orig/sram_tdp.sv
+    new_path: rtl/new/sram_tdp.sv
+    addr_width: 10
+    data_width: 32
+    enabled: true               # false = 暂不参与回归
 ```
-
-### 📦 非 B2B 单 DUT 例化 (Feature 5)
-
-即使不做 A/B 对比，也可通过脚本自动生成 `include 片段，解析端口、连接 mem_if。
-
-#### `connect` — 生成 `include 例化片段（推荐）
-
-生成的文件直接 `include` 到 tb_top 中，内部已是 SRAM 的硬连线例化：
-
-```bash
-# 单 DUT
-python3 scripts/gen_sram_wrapper.py connect rtl/dut_sram.sv --role ori -O dut_ori_connect
-
-# B2B 双 DUT
-python3 scripts/gen_sram_wrapper.py connect rtl/dut_sram.sv     --role ori -O dut_ori_connect
-python3 scripts/gen_sram_wrapper.py connect rtl/dut_sram_v2.sv  --role new -O dut_new_connect
-
-# 通过 Makefile
-make gen-connect      SRAM_FILE=rtl/dut_sram.sv ROLE=ori OUTPUT=dut_connect
-make gen-connect-pair ORI_FILE=rtl/dut_sram.sv NEW_FILE=rtl/dut_sram_v2.sv
-```
-
-生成的 `dut_ori_connect.sv`：
-```systemverilog
-// AUTO-GENERATED — `include in tb_top
-dut_sram #(
-    .ADDR_WIDTH (10),
-    .DATA_WIDTH (32)
-) u_dut_ori (
-    .clk   (clk),
-    .rst_n (rst_n),
-    .cmd_a (vif.cmd_a),
-    .addr_a (vif.addr_a),
-    .wdata_a (vif.wdata_a),
-    .wem_a (vif.wem_a),
-    .rdata_a (vif.rdata_a_ori),   // role=ori → _ori
-    .cmd_b (vif.cmd_b),
-    .addr_b (vif.addr_b),
-    .wdata_b (vif.wdata_b),
-    .wem_b (vif.wem_b),
-    .rdata_b (vif.rdata_b_ori)
-);
-```
-
-tb_top 中使用：
-```systemverilog
-// 替换原来的 ifdef DUT_ORI / DUT_NEW 整段
-`include "gen/dut_ori_connect.sv"
-`include "gen/dut_new_connect.sv"
-```
-
-#### `instance` — 生成 wrapper module
-
-```bash
-python3 scripts/gen_sram_wrapper.py instance rtl/my_sram.sv --name my_dut
-make gen-instance SRAM_FILE=rtl/dut_sram.sv INST_NAME=my_sram
-```
-
-#### 自动接口扫描与连线
-
-脚本会解析 Verilog module 的端口列表，自动匹配标准接口信号，支持多种命名别名：
-
-| 标准信号 | 识别的别名 |
-|----------|-----------|
-| `cmd_a` | `cena`, `ce_a`, `cs_a`, `chip_en_a` |
-| `wdata_a` | `din_a`, `d_a`, `data_in_a` |
-| `rdata_a` | `dout_a`, `q_a`, `data_out_a` |
-| `wem_a` | `we_a`, `bweb_a`, `bw_a`, `write_mask_a` |
-| ... | ... |
-
-生成的 wrapper 自动处理：
-- 端口名称映射
-- 位宽适配 (参数化连线)
-- 未连接端口自动 tie-off
-
-### 📊 日志分析 (Feature 4)
-
-解析仿真 log，提取测试结果、SVA 错误详情，生成多格式报告。
-
-```bash
-# 快速概要
-make analyze-logs
-
-# 生成 Markdown 报告
-make analyze-md
-# → run_dir/regress_report.md
-
-# 生成 JSON 报告 (便于 CI 集成)
-make analyze-json
-# → run_dir/regress_report.json
-
-# 回归 + 自动生成报告
-make regress-report        # 单配置回归 + 报告
-make regress-multi-report  # 多配置回归 + 报告
-```
-
-报告内容：
-- ✅/❌ 统计、通过率
-- SVA 错误详情 (ori/new 值逐行对比)
-- 仿真时间、Transaction 计数
-- Per-configuration 分项统计
 
 ---
 
-## 三种 Testbench 方案
+## 内置 SRAM DUT 库
 
-| 方案 | 文件 | 特点 |
+| 类型 | 实例名 | 配置 | Orig 实现 | New 实现 |
+|------|--------|------|-----------|----------|
+| **SP** 单端口 | `sram_sp` | 256×32 | Port A 读写, B 恒0 | 读地址流水线分离 |
+| **SDP** 伪双端 | `sram_sdp` | 512×64 | A=只写, B=只读 | byte-group 写入 |
+| **TDP** 真双端 | `sram_tdp` | 1K×32 | 同址写冲突 B 胜出 | 同址写冲突 A 胜出 |
+| **BitWrite** | `sram_bitwrite` | 2K×16 | per-bit mask 直写 | byte-group + bit mask |
+| **Bank4** 多 bank | `sram_bank4` | 1024×32 | MSB 选 bank (4×256) | LSB interleave 选 bank |
+
+所有 DUT 对均为**同名 module**（orig 和 new 都叫 `sram_tdp` 等），`make gen-b2b` 自动处理重命名和连线。
+
+---
+
+## 时钟抖动
+
+```bash
+make all JITTER=1                           # ±5% uniform
+make all JITTER=1 CLK_JITTER_MODE=gaussian  # 高斯分布
+make all JITTER=1 CLK_JITTER_PCT=10          # ±10%
+```
+
+---
+
+## 日志分析
+
+```bash
+make analyze-logs     # 终端概要
+make analyze-md       # Markdown 报告 → run_dir/regress_report.md
+make analyze-json     # JSON 报告 → run_dir/regress_report.json
+
+# 回归 + 自动分析
+make regress-report
+make regress-multi-report
+```
+
+---
+
+## Testbench 方案
+
+| 方案 | 文件 | 说明 |
 |------|------|------|
-| **Simple** | `tb_top_simple.sv` | 单配置，编译时固定 ADDR_WIDTH/DATA_WIDTH |
-| **Multi (方案A)** | `tb_top_multi.sv` | generate 6 组不同配置，一次编译全部测试 |
-| **Unified (方案B)** | `tb_top_unified.sv` | 最大位宽 + Mask，运行时动态切换配置 |
-| **Feature (方案C)** | `tb_top_feature.sv` | Ref Model + 3-way 检查 (ori/new/ref) |
-
-### 方案 A — 多配置 Generate
+| **Simple** | `tb_top_simple.sv` | 单配置，编译时固定位宽 |
+| **Multi** | `tb_top_multi.sv` | generate 6 组配置，一次编译全测 |
+| **Unified** | `tb_top_unified.sv` | 最大位宽+Mask，运行时切换 |
+| **Feature** | `tb_top_feature.sv` | Ref Model + 3-way 检查 |
 
 ```bash
-make build-multi                          # 编译 (6 组 DUT)
-make run-multi INST=0 TEST=mem_sp_test    # 测配置 0 (256×8)
-make run-multi TEST=mem_sdp_test          # 6 组并发测
-make regress-multi                        # 全回归 (30 cases)
-```
+# Multi 方案
+make build-multi
+make regress-multi                     # 6配置 × 5测试 = 30 cases
 
-### 方案 B — 统一最大位宽 + Mask（推荐）
-
-```bash
-make build-unified                        # 编译 (1 组最大位宽 DUT)
-make run-unified ADDR_WIDTH=8  DATA_WIDTH=8   TEST=mem_sp_test
-make run-unified ADDR_WIDTH=12 DATA_WIDTH=64  TEST=mem_tdp_test
-
-# 一次仿真遍历全部 6 种配置
-make sweep
-```
-
-### 不同 DUT 模块
-
-```bash
-# ori 和 new 使用不同模块
-make all DUT_ORI=dut_sram DUT_NEW=dut_sram_v2
-make build-unified DUT_ORI=dut_sram DUT_NEW=dut_sram_v2
+# Unified 方案（推荐）
+make build-unified
+make sweep                             # 一次仿真遍历全部配置
 ```
 
 ---
@@ -263,48 +199,29 @@ make build-unified DUT_ORI=dut_sram DUT_NEW=dut_sram_v2
 | `mem_tdp_test` | 真双端口随机 |
 | `mem_wem_walking_test` | 写掩码走马灯 |
 | `mem_b2b_raw_test` | 同址背靠背 RAW |
-| `mem_fill_verify` | 写满全部地址再逐一读回 |
-| `mem_data_pattern` | 全0/全1/棋盘/走马灯数据模式 |
-| `mem_wem_mask` | 写掩码 byte/bit/随机验证 |
-| `mem_addr_boundary` | 边界地址测试 |
+| `mem_fill_verify` | 写满全部地址逐一读回 |
+| `mem_data_pattern` | 全0/全1/棋盘/走马灯 |
+| `mem_wem_mask` | 写掩码 byte/bit/随机 |
 | `mem_waw` / `mem_war` | 写后写 / 写后读冒险 |
 | `mem_dual_conflict` | 双端口冲突场景 |
-| `mem_reset` | 复位行为验证 |
 | `mem_stress` | 随机 Hammer 压力测试 |
-| `mem_sweep_all` | 遍历全部 6 种配置 (仅方案 B) |
 
 ---
 
-## 内置 SRAM 配置
-
-| ID | 名称 | 深度 | 位宽 | 容量 |
-|----|------|------|------|------|
-| — | 256×8 | 256 | 8 | 2Kb |
-| — | 1K×32 | 1024 | 32 | 32Kb |
-| — | 4K×64 | 4096 | 64 | 256Kb |
-| — | 64×256 | 64 | 256 | 16Kb |
-| — | 64K×8 | 65536 | 8 | 512Kb |
-| — | 512×128 | 512 | 128 | 64Kb |
-
----
-
-## Makefile 命令速查
+## Makefile 速查
 
 | 命令 | 说明 |
 |------|------|
-| `make all` | 编译 + 运行默认测试 |
-| `make build / run` | 分步编译/运行 |
+| `make all` | 编译 + 运行 |
 | `make all JITTER=1` | 带时钟抖动 |
-| `make gen-b2b` | 从 YAML 生成 B2B 文件 |
-| `make gen-connect` | 生成 `include DUT 例化片段 |
-| `make gen-connect-pair` | 生成 B2B 双 DUT connect 文件 |
-| `make gen-instance` | 生成 sram_instance wrapper module |
-| `make test-<name>` | 对特定 SRAM 实例测试 |
+| `make gen-b2b` | **核心**: YAML → 改名+connect+回归脚本 |
+| `make test-<name>` | 测试单个 SRAM 实例 |
 | `make regress-b2b` | B2B 全实例回归 |
-| `make sweep` | 一次遍历 6 种配置 |
-| `make analyze-md` | 生成 Markdown 日志报告 |
-| `make regress-report` | 回归 + 生成报告 |
-| `make wave` | 打开波形 |
+| `make regress-multi` | 多配置回归 (30 cases) |
+| `make sweep` | 遍历 6 种配置 |
+| `make analyze-md` | 生成 Markdown 报告 |
+| `make gen-connect-pair` | 手动生成双 DUT connect |
+| `make wave` | GTKWave 波形 |
 | `make clean` | 清理 |
 
 ---
@@ -314,30 +231,30 @@ make build-unified DUT_ORI=dut_sram DUT_NEW=dut_sram_v2
 ```
 ├── rtl/
 │   ├── clk_gen.sv               # 时钟发生器 (含抖动)
-│   ├── dut_sram.sv               # DUT (旧版)
-│   ├── dut_sram_v2.sv            # DUT (新版, 演示不同模块名)
-│   ├── dut_wrapper.sv            # DUT 选择包装器
-│   ├── sram_cfg_pkg.sv           # 配置定义包
+│   ├── dut_sram.sv / dut_sram_v2.sv  # 基础 DUT
 │   ├── sram_ref_model.sv         # 黄金参考模型
-│   ├── orig/                     # 原始 SRAM (同名 module 示例)
-│   └── new/                      # 替换 SRAM (同名 module 示例)
-├── verif_env/
-│   └── tb/
-│       ├── mem_if.sv             # 统一参数化接口
-│       ├── mem_sva_checker.sv    # SVA 比对模块
-│       ├── sram_test_env.sv      # 参数化测试环境
-│       ├── tb_top_simple.sv      # 方案: 单配置
-│       ├── tb_top_multi.sv       # 方案 A: 多配置 generate
-│       ├── tb_top_unified.sv     # 方案 B: 统一+Mask
-│       └── tb_top_feature.sv     # 方案 C: Ref Model 3-way check
+│   ├── orig/                     # 原始 SRAM (同名 module)
+│   │   ├── sram_sp.sv            #   单端口
+│   │   ├── sram_sdp.sv           #   伪双端口
+│   │   ├── sram_tdp.sv           #   真双端口
+│   │   ├── sram_bitwrite.sv      #   位掩码
+│   │   └── sram_bank4.sv         #   4-bank 拼接
+│   └── new/                      # 替换 SRAM (同名 module, 不同实现)
+│       └── (同上 5 个文件)
+├── verif_env/tb/
+│   ├── mem_if.sv                 # 统一参数化接口
+│   ├── mem_sva_checker.sv        # SVA 比对
+│   ├── tb_top_simple.sv          # 单配置 (支持 USE_CONNECT)
+│   ├── tb_top_multi.sv           # 多配置 generate
+│   ├── tb_top_unified.sv         # 统一+Mask
+│   └── tb_top_feature.sv         # Ref Model 3-way
 ├── scripts/
-│   ├── gen_sram_b2b.py           # B2B 文件生成器 (YAML → _ori/_new.sv)
-│   ├── gen_sram_wrapper.py       # Wrapper 生成器 (scan/wrap/full)
-│   ├── analyze_logs.py           # 日志分析器 (text/md/json)
-│   ├── run_tests.sh              # 单配置回归脚本
-│   └── run_multi_regress.sh      # 多配置回归脚本
-├── gen/                          # 自动生成文件 (已 gitignore)
-├── docs/                         # 文档
+│   ├── gen_sram_b2b.py           # B2B 批量生成 (module改名+connect+回归)
+│   ├── gen_sram_wrapper.py       # Wrapper 生成器 (scan/wrap/connect/instance)
+│   ├── analyze_logs.py           # 日志分析 (text/md/json)
+│   ├── run_tests.sh              # 单配置回归
+│   └── run_multi_regress.sh      # 多配置回归
+├── gen/                          # 自动生成 (gitignored)
 ├── sram_instances.yaml           # SRAM 实例配置
 ├── Makefile
 └── GEMINI.md                     # AI 辅助开发指引
@@ -347,10 +264,9 @@ make build-unified DUT_ORI=dut_sram DUT_NEW=dut_sram_v2
 
 ## 依赖
 
-- **Verilator 5.x** (`sudo apt install verilator`)
-- **Python 3.8+** (用于自动化脚本)
-- **PyYAML** (`pip3 install pyyaml`)
-- **GTKWave** (波形查看, 可选)
+- **Verilator 5.x**
+- **Python 3.8+** + **PyYAML** (`pip3 install pyyaml`)
+- **GTKWave** (波形, 可选)
 
 ## License
 

@@ -140,8 +140,63 @@ instances:
 | **TDP** 真双端 | `sram_tdp` | 1K×32 | 同址写冲突 B 胜出 | 同址写冲突 A 胜出 |
 | **BitWrite** | `sram_bitwrite` | 2K×16 | per-bit mask 直写 | byte-group + bit mask |
 | **Bank4** 多 bank | `sram_bank4` | 1024×32 | MSB 选 bank (4×256) | LSB interleave 选 bank |
+| **Web** WEB协议 | `sram_web` | 1K×32 | ceb+web+data_i+data_o | ECC+pipeline 优化 |
 
 所有 DUT 对均为**同名 module**（orig 和 new 都叫 `sram_tdp` 等），`make gen-b2b` 自动处理重命名和连线。
+
+---
+
+## cmd 接口说明
+
+验证环境使用统一的 **2-bit cmd 编码**驱动 SRAM：
+
+```
+cmd[1:0]  =  00 → NOP   (无操作)
+             01 → READ  (读)
+             10 → WRITE (写)
+wem        =  0  → 允许写入该 bit
+             1  → 屏蔽该 bit (mask)
+```
+
+### 与常见 SRAM IP 接口的对应
+
+真实 SRAM IP（TSMC/GF/SMIC Memory Compiler）通常使用独立控制信号：
+
+| 验证环境 | 常见 SRAM 信号 | WEB 风格 | 其他别名 |
+|----------|---------------|----------|---------|
+| `cmd_a` | `cmd_a` | `ceb_a`, `csb_a` | `cena`, `ce_a`, `cs_a`, `cen_a` |
+| `addr_a` | `addr_a` | `addr_a` | `a_addr`, `addr_a_i` |
+| `wdata_a` | `wdata_a` | `data_i_a` | `din_a`, `d_a`, `di_a` |
+| `wem_a` | `wem_a` | `bw_a`, `bweb_a` | `bm_a`, `byte_mask_a` |
+| `rdata_a` | `rdata_a` | `data_o_a` | `dout_a`, `q_a`, `do_a` |
+| `clk` | `clk` | `clk`, `clka` | `clock`, `clk_i` |
+| `rst_n` | `rst_n` | `rst_n` | `reset_n`, `nreset` (无复位则省略) |
+
+### WEB 协议自动转换
+
+`ceb` + `web` 是最常见的 foundry SRAM 接口：
+- `ceb=1` → NOP (chip disabled)
+- `ceb=0, web=1` → READ
+- `ceb=0, web=0` → WRITE
+
+当模块端口名匹配 `ceb`/`web`/`data_i`/`data_o`/`bw` 时，connect 文件自动插入 inline 协议转换：
+
+```systemverilog
+// gen/sram_web_connect.sv — 自动生成的转换逻辑
+wire ceb_a_ori, web_a_ori, ceb_b_ori, web_b_ori;
+wire ceb_a_new, web_a_new, ceb_b_new, web_b_new;
+
+// cmd → ceb/web: NOP→ceb=1, READ→ceb=0+web=1, WRITE→ceb=0+web=0
+assign ceb_a_ori = (vif.cmd_a == 2'b00);
+assign web_a_ori = (vif.cmd_a != 2'b10);
+...
+
+sram_web_ori #(.AW(10), .DW(32)) u_dut_ori (
+    .ceb_a(ceb_a_ori), .web_a(web_a_ori),       // ← 转换后信号
+    .data_i_a(vif.wdata_a), .data_o_a(vif.rdata_a_ori),
+    .bw_a(vif.wem_a), ...
+);
+```
 
 ---
 
@@ -231,16 +286,18 @@ make sweep                             # 一次仿真遍历全部配置
 ```
 ├── rtl/
 │   ├── clk_gen.sv               # 时钟发生器 (含抖动)
+│   ├── sram_proto_adapter.sv    # 协议适配器 (cmd↔ceb+web)
 │   ├── dut_sram.sv / dut_sram_v2.sv  # 基础 DUT
 │   ├── sram_ref_model.sv         # 黄金参考模型
 │   ├── orig/                     # 原始 SRAM (同名 module)
-│   │   ├── sram_sp.sv            #   单端口
-│   │   ├── sram_sdp.sv           #   伪双端口
-│   │   ├── sram_tdp.sv           #   真双端口
-│   │   ├── sram_bitwrite.sv      #   位掩码
-│   │   └── sram_bank4.sv         #   4-bank 拼接
+│   │   ├── sram_sp.sv            #   单端口 (cmd)
+│   │   ├── sram_sdp.sv           #   伪双端口 (cmd)
+│   │   ├── sram_tdp.sv           #   真双端口 (cmd)
+│   │   ├── sram_bitwrite.sv      #   位掩码 (cmd)
+│   │   ├── sram_bank4.sv         #   4-bank 拼接 (cmd)
+│   │   └── sram_web.sv           #   WEB协议 (ceb+web)
 │   └── new/                      # 替换 SRAM (同名 module, 不同实现)
-│       └── (同上 5 个文件)
+│       └── (同上 6 个文件)
 ├── verif_env/tb/
 │   ├── mem_if.sv                 # 统一参数化接口
 │   ├── mem_sva_checker.sv        # SVA 比对

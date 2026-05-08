@@ -6,6 +6,7 @@
 #   dualclk    — dual-clock with multi-clock SVA
 #   feature    — ref model + A/B + functional 3-way check
 #   unified    — max-width unified interface + mask
+#   uvm        — UVM 1.2 (1800.2) with agent/driver/sequencer/test
 # ================================================================
 
 SIM           ?= verilator
@@ -20,8 +21,15 @@ NUM_PORTS     ?= 2            # 1=single, 2=dual
 CLK_A_PS      ?= 10000
 CLK_B_PS      ?= 10000
 CLK_B_PHASE_PS ?= 0
+UVM_TEST      ?= test_mem_fill_verify
+UVM_VERBOSITY ?= UVM_MEDIUM
 WAVE_FILE     ?= dump.fst
 RUN_DIR       ?= run_dir
+
+# UVM 1.2 / 1800.2 paths
+UVM_HOME      ?= /home/chen/proj/UVM/UVM-1800.2-2020.3.1
+UVM_SRC       ?= $(UVM_HOME)/1800.2-2020.3.1/src
+UVM_PKG       ?= $(UVM_SRC)/uvm_pkg.sv
 
 # DUT sources
 DUT_SRCS      = ./rtl/dut_sram.sv ./rtl/dut_sram_v2.sv
@@ -147,6 +155,51 @@ run-unified:
 sweep: clean build-unified
 	@echo "==> [Unified] Config Sweep (6 configs, 1 run)"
 	cd $(RUN_DIR) && ./Vtb_top +TEST=mem_sweep_all +TX_COUNT=30
+
+# ================================================================
+# UVM Architecture (UVM 1.2 / 1800.2)
+# ================================================================
+SRC_UVM       = $(UVM_PKG) \
+                $(SRC_COMMON) ./rtl/clk_gen_dual.sv $(DUT_SRCS) \
+                ./rtl/sram_ref_model.sv \
+                ./verif_env/tb/mem_port_if.sv \
+                ./verif_env/tb/mem_port_checker.sv \
+                ./verif_env/uvc/mem_uvc_pkg.sv \
+                ./verif_env/tests/mem_test_pkg.sv \
+                ./verif_env/tb/tb_top_uvm.sv
+
+# UVM DPI: standalone Verilator-compatible DPI implementation
+UVM_DPI_SRC   = ./verif_env/dpi/uvm_dpi_verilator.c
+UVM_INCDIRS   = +incdir+$(UVM_SRC) +incdir+$(UVM_SRC)/dpi \
+                +incdir+$(UVM_SRC)/macros \
+                +incdir+./verif_env/uvc +incdir+./verif_env/tests
+VFLAGS_UVM    = $(VFLAGS_BASE) -Wno-UNUSEDPARAM -Wno-UNUSEDSIGNAL \
+                -Wno-UNDRIVEN -Wno-PINCONNECTEMPTY \
+                $(UVM_INCDIRS)
+
+.PHONY: build-uvm run-uvm
+
+build-uvm:
+	@echo "==> [UVM] Building with UVM 1.2 (1800.2)"
+	mkdir -p $(RUN_DIR)
+	$(SIM) $(VFLAGS_UVM) $(DUT_DEFINES) $(SRC_UVM) \
+		--exe $(UVM_DPI_SRC) --top-module tb_top --Mdir $(RUN_DIR)
+
+run-uvm:
+	@echo "==> [UVM] Test=$(UVM_TEST) cfg=$(ADDR_WIDTH)x$(DATA_WIDTH)"
+	cd $(RUN_DIR) && ./Vtb_top +UVM_TESTNAME=$(UVM_TEST) +UVM_VERBOSITY=$(UVM_VERBOSITY) \
+		+ADDR_WIDTH=$(ADDR_WIDTH) +DATA_WIDTH=$(DATA_WIDTH) +TX_COUNT=$(TX_COUNT) \
+		+CLK_A_PS=$(CLK_A_PS) +CLK_B_PS=$(CLK_B_PS)
+
+# Quick UVM tests
+.PHONY: uvm-sp uvm-sdp uvm-tdp uvm-wem uvm-b2b uvm-fill
+
+uvm-sp:   clean build-uvm; $(MAKE) run-uvm UVM_TEST=test_mem_sp
+uvm-sdp:  clean build-uvm; $(MAKE) run-uvm UVM_TEST=test_mem_sdp
+uvm-tdp:  clean build-uvm; $(MAKE) run-uvm UVM_TEST=test_mem_tdp
+uvm-wem:  clean build-uvm; $(MAKE) run-uvm UVM_TEST=test_mem_wem_walking
+uvm-b2b:  clean build-uvm; $(MAKE) run-uvm UVM_TEST=test_mem_b2b_raw
+uvm-fill: clean build-uvm; $(MAKE) run-uvm UVM_TEST=test_mem_fill_verify
 
 # ================================================================
 # Generators

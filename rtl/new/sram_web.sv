@@ -52,11 +52,11 @@ module sram_web #(
     always_ff @(posedge clk) begin
         if (!ceb_a && !web_a) begin
             for (int i = 0; i < DATA_WIDTH; i++)
-                if (!bw_a[i]) mem[addr_a][i] <= data_i_a[i];
+                if (!bw_a[i]) mem[addr_a][i] = data_i_a[i];
         end
         if (!ceb_b && !web_b) begin
             for (int i = 0; i < DATA_WIDTH; i++)
-                if (!bw_b[i]) mem[addr_b][i] <= data_i_b[i];
+                if (!bw_b[i]) mem[addr_b][i] = data_i_b[i];
         end
     end
 

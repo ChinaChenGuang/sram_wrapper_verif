@@ -46,7 +46,7 @@ module sram_sp #(
     always_ff @(posedge clk) begin
         if (cmd_a == 2'b10) begin
             for (int i = 0; i < DATA_WIDTH; i++)
-                if (!wem_a[i]) mem[addr_a][i] <= wdata_a[i];
+                if (!wem_a[i]) mem[addr_a][i] = wdata_a[i];
         end
     end
 

@@ -26,6 +26,7 @@ module tb_top;
     localparam MAX_ADDR_WIDTH = 16;
     localparam MAX_DATA_WIDTH = 256;
     localparam READ_LATENCY    = 1;
+    parameter SRAM_MODE       = 2;  // 0=SP 1=SDP 2=TDP (override with -G)
 
     // ----------------------------------------------------------
     // Clock and Reset
@@ -69,12 +70,12 @@ module tb_top;
     );
 
     // ----------------------------------------------------------
-    // Golden Reference Model
+    // Golden Reference Model (mode-aware: 0=SP, 1=SDP, 2=TDP)
     // ----------------------------------------------------------
     logic [MAX_DATA_WIDTH-1:0] rdata_a_ref;
     logic [MAX_DATA_WIDTH-1:0] rdata_b_ref;
 
-    sram_ref_model #(MAX_ADDR_WIDTH, MAX_DATA_WIDTH, READ_LATENCY) ref_model (
+    sram_ref_model #(MAX_ADDR_WIDTH, MAX_DATA_WIDTH, READ_LATENCY, SRAM_MODE) ref_model (
         .clk(clk), .rst_n(rst_n),
         .cmd_a(vif.cmd_a), .addr_a(vif.addr_a),
         .wdata_a(vif.wdata_a), .wem_a(vif.wem_a), .rdata_a_ref(rdata_a_ref),

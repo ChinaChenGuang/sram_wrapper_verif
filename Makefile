@@ -16,6 +16,7 @@ ADDR_WIDTH   ?= 10
 DATA_WIDTH   ?= 32
 DUT_ORI      ?= dut_sram     # Original DUT module name
 DUT_NEW      ?= dut_sram     # New DUT module name (same or different)
+SRAM_MODE    ?= 2            # 0=SP, 1=SDP, 2=TDP (for ref model matching)
 JITTER       ?= 1            # 1=enable clock jitter (±5%), 0=disable
 WAVE_FILE    ?= dump.fst
 RUN_DIR      ?= run_dir
@@ -168,7 +169,7 @@ build-feature:
 	@echo "==> [Feature] Ref Model + A/B + Func Check  ORI=$(DUT_ORI) NEW=$(DUT_NEW)"
 	mkdir -p $(RUN_DIR)
 	$(SIM) $(VFLAGS_BASE) $(DUT_DEFINES) $(SRC_FEATURE) \
-		--top-module tb_top --Mdir $(RUN_DIR)
+		-GSRAM_MODE=$(SRAM_MODE) --top-module tb_top --Mdir $(RUN_DIR)
 
 run-feature:
 	@echo "==> [Feature] Test: $(TEST) cfg: $(ADDR_WIDTH)x$(DATA_WIDTH)"

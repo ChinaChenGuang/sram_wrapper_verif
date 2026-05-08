@@ -46,7 +46,7 @@ module cpu_sys_256x182_mem_wrap #(
         if (cmd_a == 2'b10) begin  // WRITE
             for (int i = 0; i < DATA_WIDTH; i++) begin
                 if (!wem_a[i])  // Active low: 0=write
-                    mem[addr_a][i] <= wdata_a[i];
+                    mem[addr_a][i] = wdata_a[i];
             end
         end
     end
@@ -66,7 +66,7 @@ module cpu_sys_256x182_mem_wrap #(
         if (cmd_b == 2'b10) begin
             for (int i = 0; i < DATA_WIDTH; i++) begin
                 if (!wem_b[i])
-                    mem[addr_b][i] <= wdata_b[i];
+                    mem[addr_b][i] = wdata_b[i];
             end
         end
     end

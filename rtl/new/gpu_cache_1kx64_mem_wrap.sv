@@ -46,11 +46,11 @@ module gpu_cache_1kx64_mem_wrap #(
         // ECC generation (stub) - same interface, different impl
         if (cmd_a == 2'b10) begin
             for (int i = 0; i < DATA_WIDTH; i++)
-                if (!wem_a[i]) mem[addr_a][i] <= wdata_a[i];
+                if (!wem_a[i]) mem[addr_a][i] = wdata_a[i];
         end
         if (cmd_b == 2'b10) begin
             for (int i = 0; i < DATA_WIDTH; i++)
-                if (!wem_b[i]) mem[addr_b][i] <= wdata_b[i];
+                if (!wem_b[i]) mem[addr_b][i] = wdata_b[i];
         end
     end
 

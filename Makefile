@@ -1,291 +1,84 @@
 # ================================================================
-# SRAM Wrapper CLI Makefile
+# SRAM Wrapper Verification Makefile
 # ================================================================
-# Supports:
-#   1. Single-config testing (ADDR_WIDTH / DATA_WIDTH via variables)
-#   2. Multi-config testing (6 configs in one build via generate)
-#   3. Full regression (all configs x all test cases)
+# Testbench architectures:
+#   decoupled  — per-port interface, independent clk domains (default)
+#   dualclk    — dual-clock with multi-clock SVA
+#   feature    — ref model + A/B + functional 3-way check
+#   unified    — max-width unified interface + mask
 # ================================================================
 
-SIM          ?= verilator
-TOP          ?= tb_top
-TEST         ?= mem_sdp_test
-TX_COUNT     ?= 200
-INST         ?= all          # all | 0 | 1 | ...
-ADDR_WIDTH   ?= 10
-DATA_WIDTH   ?= 32
-DUT_ORI      ?= dut_sram     # Original DUT module name
-DUT_NEW      ?= dut_sram     # New DUT module name (same or different)
-SRAM_MODE    ?= 2            # 0=SP, 1=SDP, 2=TDP (for ref model matching)
-NUM_PORTS    ?= 2            # 1=single-port, 2=dual-port
-JITTER       ?= 1            # 1=enable clock jitter (±5%), 0=disable
-WAVE_FILE    ?= dump.fst
-RUN_DIR      ?= run_dir
+SIM           ?= verilator
+TEST          ?= mem_fill_verify
+TX_COUNT      ?= 50
+ADDR_WIDTH    ?= 10
+DATA_WIDTH    ?= 32
+DUT_ORI       ?= dut_sram
+DUT_NEW       ?= dut_sram
+SRAM_MODE     ?= 2            # 0=SP, 1=SDP, 2=TDP
+NUM_PORTS     ?= 2            # 1=single, 2=dual
+CLK_A_PS      ?= 10000
+CLK_B_PS      ?= 10000
+CLK_B_PHASE_PS ?= 0
+WAVE_FILE     ?= dump.fst
+RUN_DIR       ?= run_dir
 
-# DUT module sources (add new DUT modules here)
-# If gen/sram_b2b_list.mk exists, it will override these defaults
-DUT_SRCS     ?= ./rtl/dut_sram.sv
-DUT_SRCS     += ./rtl/dut_sram_v2.sv   # alternative "new" DUT
+# DUT sources
+DUT_SRCS      = ./rtl/dut_sram.sv ./rtl/dut_sram_v2.sv
+DUT_DEFINES   = +define+DUT_ORI=$(DUT_ORI) +define+DUT_NEW=$(DUT_NEW)
 
-# Pass DUT module names as Verilator defines (overridable for USE_CONNECT mode)
-DUT_DEFINES  ?= +define+DUT_ORI=$(DUT_ORI) +define+DUT_NEW=$(DUT_NEW)
-
-# ================================================================
-# Include B2B generated targets (if generated)
-# ================================================================
+# Include generated targets
 -include gen/sram_b2b_list.mk
 
-# Sources
-SRC_COMMON  = ./verif_env/tb/mem_if.sv \
-              ./rtl/clk_gen.sv
-SRC_SIMPLE  = $(SRC_COMMON) \
-              ./verif_env/tb/mem_sva_checker.sv \
-              $(DUT_SRCS) \
-              ./verif_env/tb/tb_top_simple.sv
-
-SRC_MULTI   = $(SRC_COMMON) \
-              ./verif_env/tb/mem_sva_checker.sv \
-              $(DUT_SRCS) \
-              ./verif_env/tb/sram_test_env.sv \
-              ./verif_env/tb/tb_top_multi.sv
-
-SRC_FEATURE = $(SRC_COMMON) \
-              $(DUT_SRCS) \
-              ./rtl/sram_ref_model.sv \
-              ./verif_env/tb/tb_top_feature.sv
-
-SRC_DECOUPLED = $(SRC_COMMON) \
-              ./rtl/clk_gen_dual.sv \
-              $(DUT_SRCS) \
-              ./rtl/sram_ref_model.sv \
-              ./verif_env/tb/mem_port_if.sv \
-              ./verif_env/tb/mem_port_checker.sv \
-              ./verif_env/tb/tb_top_decoupled.sv
-
-SRC_DUALCLK = $(SRC_COMMON) \
-              ./rtl/clk_gen_dual.sv \
-              $(DUT_SRCS) \
-              ./rtl/sram_ref_model.sv \
-              ./verif_env/tb/mem_if_dualclk.sv \
-              ./verif_env/tb/tb_top_dualclk.sv
-
-# Clock jitter: 1=enable, 0=ideal clock
-CLK_FLAGS    = $(if $(filter 1,$(JITTER)),+define+USE_CLK_GEN,)
+# Common sources
+SRC_COMMON    = ./rtl/clk_gen.sv
 
 # Verilator flags
-VFLAGS_BASE = --binary --main --timing -j 4 --trace-fst --assert \
-              -Wno-fatal -Wno-lint -Wno-style -Wno-SYMRSVDWORD -Wno-IGNOREDRETURN \
-              +incdir+./verif_env/tb +incdir+./gen $(CLK_FLAGS)
+VFLAGS_BASE   = --binary --main --timing -j 4 --trace-fst --assert \
+                -Wno-fatal -Wno-lint -Wno-style -Wno-SYMRSVDWORD -Wno-IGNOREDRETURN \
+                +incdir+./verif_env/tb +incdir+./gen
 
 # ================================================================
-# Single-Config Targets (default)
+# Source lists per architecture
+# ================================================================
+SRC_DECOUPLED = $(SRC_COMMON) ./rtl/clk_gen_dual.sv $(DUT_SRCS) \
+                ./rtl/sram_ref_model.sv \
+                ./verif_env/tb/mem_port_if.sv \
+                ./verif_env/tb/mem_port_checker.sv \
+                ./verif_env/tb/tb_top_decoupled.sv
+
+SRC_DUALCLK   = $(SRC_COMMON) ./rtl/clk_gen_dual.sv $(DUT_SRCS) \
+                ./rtl/sram_ref_model.sv \
+                ./verif_env/tb/mem_if.sv \
+                ./verif_env/tb/mem_if_dualclk.sv \
+                ./verif_env/tb/tb_top_dualclk.sv
+
+SRC_FEATURE   = $(SRC_COMMON) $(DUT_SRCS) \
+                ./rtl/sram_ref_model.sv \
+                ./verif_env/tb/mem_if.sv \
+                ./verif_env/tb/tb_top_feature.sv
+
+SRC_UNIFIED   = $(SRC_COMMON) $(DUT_SRCS) \
+                ./verif_env/tb/mem_if.sv \
+                ./verif_env/tb/tb_top_unified.sv
+
+# ================================================================
+# Default: decoupled architecture
 # ================================================================
 .PHONY: all build run
 
 all: build run
 
-build:
-	@echo "==> [Single] Building: ORI=$(DUT_ORI) NEW=$(DUT_NEW) W=$(ADDR_WIDTH) D=$(DATA_WIDTH)"
-	mkdir -p $(RUN_DIR)
-	$(SIM) $(VFLAGS_BASE) $(DUT_DEFINES) -GADDR_WIDTH=$(ADDR_WIDTH) -GDATA_WIDTH=$(DATA_WIDTH) \
-		$(SRC_SIMPLE) --top-module tb_top --Mdir $(RUN_DIR)
-
-run:
-	@echo "==> [Single] Test: $(TEST) Config: $(ADDR_WIDTH)x$(DATA_WIDTH) Tx: $(TX_COUNT)"
-	cd $(RUN_DIR) && ./Vtb_top +TEST=$(TEST) +TX_COUNT=$(TX_COUNT)
+build: build-decoupled
+run: run-decoupled
 
 # ================================================================
-# Multi-Config Targets
-# ================================================================
-.PHONY: build-multi run-multi
-
-build-multi:
-	@echo "==> [Multi] Building 6 configs: ORI=$(DUT_ORI) NEW=$(DUT_NEW)"
-	mkdir -p $(RUN_DIR)
-	$(SIM) $(VFLAGS_BASE) $(DUT_DEFINES) $(SRC_MULTI) --top-module tb_top --Mdir $(RUN_DIR)
-
-run-multi:
-ifeq ($(INST),all)
-	@echo "==> [Multi] Testing ALL configs: $(TEST) Tx=$(TX_COUNT)"
-	@cd $(RUN_DIR) && ./Vtb_top +TEST=$(TEST) +TX_COUNT=$(TX_COUNT) 2>&1 \
-		| tee $(TEST)_all.log
-else
-	@echo "==> [Multi] Testing config [$(INST)]: $(TEST) Tx=$(TX_COUNT)"
-	cd $(RUN_DIR) && ./Vtb_top +INST_ID=$(INST) +TEST=$(TEST) +TX_COUNT=$(TX_COUNT)
-endif
-
-# ================================================================
-# Regression: Single-Config (all tests, default config)
-# ================================================================
-.PHONY: regress
-
-regress: clean build
-	@echo "===== Single-Config Regression ($(ADDR_WIDTH)x$(DATA_WIDTH)) ====="
-	@./scripts/run_tests.sh ./$(RUN_DIR)/Vtb_top $(ADDR_WIDTH) $(DATA_WIDTH) $(TX_COUNT)
-
-# ================================================================
-# Regression: Multi-Config (all configs x all tests)
-# ================================================================
-.PHONY: regress-multi
-
-regress-multi: clean build-multi
-	@echo "===== Multi-Config Regression ====="
-	@./scripts/run_multi_regress.sh ./$(RUN_DIR)/Vtb_top $(TX_COUNT)
-
-# ================================================================
-# Quick Config Tests (single config, rebuilds per config)
-# ================================================================
-.PHONY: test-256x8 test-1Kx32 test-4Kx64 test-64x256 test-64Kx8 test-512x128
-
-test-256x8:
-	$(MAKE) clean build run ADDR_WIDTH=8  DATA_WIDTH=8   TEST=$(TEST)
-
-test-1Kx32:
-	$(MAKE) clean build run ADDR_WIDTH=10 DATA_WIDTH=32  TEST=$(TEST)
-
-test-4Kx64:
-	$(MAKE) clean build run ADDR_WIDTH=12 DATA_WIDTH=64  TEST=$(TEST)
-
-test-64x256:
-	$(MAKE) clean build run ADDR_WIDTH=6  DATA_WIDTH=256 TEST=$(TEST)
-
-test-64Kx8:
-	$(MAKE) clean build run ADDR_WIDTH=16 DATA_WIDTH=8   TEST=$(TEST)
-
-test-512x128:
-	$(MAKE) clean build run ADDR_WIDTH=9  DATA_WIDTH=128 TEST=$(TEST)
-
-# ================================================================
-# Unified Max-Width + Mask Targets (方案 B)
-# ================================================================
-.PHONY: build-unified run-unified sweep
-
-build-unified:
-	@echo "==> [Unified] Max AW=16 DW=256  ORI=$(DUT_ORI) NEW=$(DUT_NEW)"
-	mkdir -p $(RUN_DIR)
-	$(SIM) $(VFLAGS_BASE) $(DUT_DEFINES) $(SRC_UNIFIED) \
-		--top-module tb_top --Mdir $(RUN_DIR)
-
-run-unified:
-	@echo "==> [Unified] Test: $(TEST) cfg: $(ADDR_WIDTH)x$(DATA_WIDTH)"
-	cd $(RUN_DIR) && ./Vtb_top +TEST=$(TEST) \
-		+ADDR_WIDTH=$(ADDR_WIDTH) +DATA_WIDTH=$(DATA_WIDTH) +TX_COUNT=$(TX_COUNT)
-
-# 一次仿真遍历所有 6 种配置
-sweep: clean build-unified
-	@echo "==> [Unified] Config Sweep: 6 configs in 1 simulation"
-	cd $(RUN_DIR) && ./Vtb_top +TEST=mem_sweep_all +TX_COUNT=30
-
-# ================================================================
-# Feature Verification Targets (方案 C: Ref Model + 3-way check)
-# ================================================================
-.PHONY: build-feature run-feature regress-feature
-
-build-feature:
-	@echo "==> [Feature] Ref Model + A/B + Func Check  ORI=$(DUT_ORI) NEW=$(DUT_NEW)"
-	mkdir -p $(RUN_DIR)
-	$(SIM) $(VFLAGS_BASE) $(DUT_DEFINES) $(SRC_FEATURE) \
-		-GSRAM_MODE=$(SRAM_MODE) --top-module tb_top --Mdir $(RUN_DIR)
-
-run-feature:
-	@echo "==> [Feature] Test: $(TEST) cfg: $(ADDR_WIDTH)x$(DATA_WIDTH)"
-	cd $(RUN_DIR) && ./Vtb_top +TEST=$(TEST) \
-		+ADDR_WIDTH=$(ADDR_WIDTH) +DATA_WIDTH=$(DATA_WIDTH) +TX_COUNT=$(TX_COUNT)
-
-# 全部 feature 测试一次跑完
-regress-feature: clean build-feature
-	@echo "===== Feature Regression ====="
-	cd $(RUN_DIR) && ./Vtb_top +TEST=mem_feature_all \
-		+ADDR_WIDTH=$(ADDR_WIDTH) +DATA_WIDTH=$(DATA_WIDTH) +TX_COUNT=100 2>&1 \
-		| grep -E "FEATURE|ERROR|Done"
-
-# ================================================================
-# All configs quick sweep (single test across all configs)
-# ================================================================
-.PHONY: sweep-configs
-
-sweep-configs:
-	@echo "===== Config Sweep: $(TEST) ====="
-	@for cfg in "8 8 256x8" "10 32 1Kx32" "12 64 4Kx64" "6 256 64x256" "16 8 64Kx8" "9 128 512x128"; do \
-		set -- $$cfg; \
-		echo "--- $$3 ---"; \
-		$(MAKE) clean build run ADDR_WIDTH=$$1 DATA_WIDTH=$$2 TEST=$(TEST) TX_COUNT=50 2>&1 | grep -E "PASS|FAIL|ERROR|SVA"; \
-	done
-
-# ================================================================
-# SRAM B2B Generator
-# ================================================================
-.PHONY: gen-b2b
-
-gen-b2b:
-	@echo "==> Generating B2B SRAM files from sram_instances.yaml..."
-	python3 scripts/gen_sram_b2b.py
-
-# Force regenerate (ignore cache)
-gen-b2b-force:
-	@echo "==> Force regenerating B2B SRAM files..."
-	rm -rf gen/
-	python3 scripts/gen_sram_b2b.py
-
-# ================================================================
-# Log Analysis
-# ================================================================
-.PHONY: analyze-logs analyze-md analyze-json
-
-analyze-logs:
-	@echo "==> Analyzing simulation logs..."
-	python3 scripts/analyze_logs.py $(RUN_DIR)/logs/ --summary
-
-analyze-md:
-	@echo "==> Generating Markdown report..."
-	python3 scripts/analyze_logs.py $(RUN_DIR)/logs/ --report md -o $(RUN_DIR)/regress_report.md
-	@echo "Report: $(RUN_DIR)/regress_report.md"
-
-analyze-json:
-	@echo "==> Generating JSON report..."
-	python3 scripts/analyze_logs.py $(RUN_DIR)/logs/ --report json -o $(RUN_DIR)/regress_report.json
-	@echo "Report: $(RUN_DIR)/regress_report.json"
-
-# Regression + auto-analyze
-regress-report: regress
-	$(MAKE) analyze-md
-
-regress-multi-report: regress-multi
-	$(MAKE) analyze-md
-
-# ================================================================
-# SRAM Instance Generator (non-B2B, single DUT)
-# ================================================================
-.PHONY: gen-instance
-
-gen-instance:
-	@echo "==> Generating sram_instance.sv from $(SRAM_FILE)..."
-	python3 scripts/gen_sram_wrapper.py instance $(SRAM_FILE) -o gen $(if $(INST_NAME),-n $(INST_NAME),)
-
-# ================================================================
-# SRAM Connect Generator (`include snippet for tb_top)
-# ================================================================
-.PHONY: gen-connect gen-connect-pair
-
-gen-connect:
-	@echo "==> Generating `include snippet from $(SRAM_FILE)..."
-	python3 scripts/gen_sram_wrapper.py connect $(SRAM_FILE) \
-		--role $(ROLE) -O $(OUTPUT) -o gen $(if $(INST_NAME),--inst-name $(INST_NAME),)
-
-# Generate both ori and new connect files for B2B
-# Usage: make gen-connect-pair ORI_FILE=rtl/dut_sram.sv NEW_FILE=rtl/dut_sram_v2.sv
-gen-connect-pair:
-	@echo "==> Generating B2B connect pair..."
-	python3 scripts/gen_sram_wrapper.py connect $(ORI_FILE) --role ori -O dut_ori_connect -o gen
-	python3 scripts/gen_sram_wrapper.py connect $(NEW_FILE) --role new -O dut_new_connect -o gen
-
-# ================================================================
-# Decoupled Port Targets
+# Decoupled (recommended)
 # ================================================================
 .PHONY: build-decoupled run-decoupled
 
 build-decoupled:
-	@echo "==> [Decoupled] ORI=$(DUT_ORI) NEW=$(DUT_NEW) PORTS=$(NUM_PORTS) MODE=$(SRAM_MODE)"
+	@echo "==> [Decoupled] PORTS=$(NUM_PORTS) MODE=$(SRAM_MODE)"
 	mkdir -p $(RUN_DIR)
 	$(SIM) $(VFLAGS_BASE) $(DUT_DEFINES) $(SRC_DECOUPLED) \
 		-GSRAM_MODE=$(SRAM_MODE) -GNUM_PORTS=$(NUM_PORTS) --top-module tb_top --Mdir $(RUN_DIR)
@@ -297,37 +90,85 @@ run-decoupled:
 		+CLK_A_PS=$(CLK_A_PS) +CLK_B_PS=$(CLK_B_PS) +CLK_B_PHASE_PS=$(CLK_B_PHASE_PS)
 
 # ================================================================
-# Common
+# Dual-Clock
 # ================================================================
-.PHONY: wave clean
-
-wave:
-	@echo "==> Opening Waveform with GTKWave..."
-	gtkwave $(RUN_DIR)/$(WAVE_FILE) &
-
-clean:
-	@echo "==> Cleaning..."
-	rm -rf $(RUN_DIR)
-
-# ================================================================
-# Dual-Clock Targets
-# ================================================================
-.PHONY: build-dualclk run-dualclk sweep-clocks
-
-CLK_A_PS      ?= 10000
-CLK_B_PS      ?= 10000
-CLK_B_PHASE_PS ?= 0
+.PHONY: build-dualclk run-dualclk
 
 build-dualclk:
-	@echo "==> [DualClk] ORI=$(DUT_ORI) NEW=$(DUT_NEW) MODE=$(SRAM_MODE)"
+	@echo "==> [DualClk] MODE=$(SRAM_MODE)"
 	mkdir -p $(RUN_DIR)
 	$(SIM) $(VFLAGS_BASE) $(DUT_DEFINES) $(SRC_DUALCLK) \
 		-GSRAM_MODE=$(SRAM_MODE) --top-module tb_top --Mdir $(RUN_DIR)
 
 run-dualclk:
-	@echo "==> [DualClk] Test=$(TEST) A=$(CLK_A_PS)ps B=$(CLK_B_PS)ps phase=$(CLK_B_PHASE_PS)ps"
+	@echo "==> [DualClk] Test=$(TEST) A=$(CLK_A_PS)ps B=$(CLK_B_PS)ps ph=$(CLK_B_PHASE_PS)ps"
 	cd $(RUN_DIR) && ./Vtb_top +TEST=$(TEST) \
 		+ADDR_WIDTH=$(ADDR_WIDTH) +DATA_WIDTH=$(DATA_WIDTH) +TX_COUNT=$(TX_COUNT) \
 		+CLK_A_PS=$(CLK_A_PS) +CLK_B_PS=$(CLK_B_PS) +CLK_B_PHASE_PS=$(CLK_B_PHASE_PS)
+
+# ================================================================
+# Feature
+# ================================================================
+.PHONY: build-feature run-feature regress-feature
+
+build-feature:
+	@echo "==> [Feature] MODE=$(SRAM_MODE)"
+	mkdir -p $(RUN_DIR)
+	$(SIM) $(VFLAGS_BASE) $(DUT_DEFINES) $(SRC_FEATURE) \
+		-GSRAM_MODE=$(SRAM_MODE) --top-module tb_top --Mdir $(RUN_DIR)
+
+run-feature:
+	@echo "==> [Feature] Test=$(TEST) cfg=$(ADDR_WIDTH)x$(DATA_WIDTH)"
+	cd $(RUN_DIR) && ./Vtb_top +TEST=$(TEST) \
+		+ADDR_WIDTH=$(ADDR_WIDTH) +DATA_WIDTH=$(DATA_WIDTH) +TX_COUNT=$(TX_COUNT)
+
+regress-feature: clean build-feature
+	@echo "===== Feature Regression ====="
+	cd $(RUN_DIR) && ./Vtb_top +TEST=mem_feature_all \
+		+ADDR_WIDTH=$(ADDR_WIDTH) +DATA_WIDTH=$(DATA_WIDTH) +TX_COUNT=100 2>&1 \
+		| grep -E "FEATURE|ERROR|Done"
+
+# ================================================================
+# Unified
+# ================================================================
+.PHONY: build-unified run-unified sweep
+
+build-unified:
+	@echo "==> [Unified] Max AW=16 DW=256"
+	mkdir -p $(RUN_DIR)
+	$(SIM) $(VFLAGS_BASE) $(DUT_DEFINES) $(SRC_UNIFIED) \
+		--top-module tb_top --Mdir $(RUN_DIR)
+
+run-unified:
+	@echo "==> [Unified] Test=$(TEST) cfg=$(ADDR_WIDTH)x$(DATA_WIDTH)"
+	cd $(RUN_DIR) && ./Vtb_top +TEST=$(TEST) \
+		+ADDR_WIDTH=$(ADDR_WIDTH) +DATA_WIDTH=$(DATA_WIDTH) +TX_COUNT=$(TX_COUNT)
+
+sweep: clean build-unified
+	@echo "==> [Unified] Config Sweep (6 configs, 1 run)"
+	cd $(RUN_DIR) && ./Vtb_top +TEST=mem_sweep_all +TX_COUNT=30
+
+# ================================================================
+# Generators
+# ================================================================
+.PHONY: gen-b2b gen-b2b-force
+
+gen-b2b:
+	python3 scripts/gen_sram_b2b.py
+
+gen-b2b-force:
+	rm -rf gen/
+	python3 scripts/gen_sram_b2b.py
+
+# ================================================================
+# Common
+# ================================================================
+.PHONY: wave clean
+
+wave:
+	gtkwave $(RUN_DIR)/$(WAVE_FILE) &
+
+clean:
+	rm -rf $(RUN_DIR)
 
 .DEFAULT_GOAL := all

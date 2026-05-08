@@ -152,18 +152,26 @@ STANDARD_PORTS = {
 }
 
 PORT_ALIASES = {
-    'clk':     [r'^clk$', r'^clock$', r'^clk_i$', r'^clk_in$'],
+    'clk':     [r'^clk$', r'^clock$', r'^clk_i$', r'^clk_in$', r'^clka?$'],
     'rst_n':   [r'^rst_n$', r'^rstn$', r'^reset_n$', r'^rst_ni$', r'^nreset$'],
-    'cmd_a':   [r'^cmd_a$', r'^cena$', r'^ce_a$', r'^cs_a$', r'^chip_en_a$'],
-    'addr_a':  [r'^addr_a$', r'^a_addr$', r'^addr_a_i$'],
-    'wdata_a': [r'^wdata_a$', r'^din_a$', r'^d_a$', r'^data_in_a$'],
-    'wem_a':   [r'^wem_a$', r'^we_a$', r'^bweb_a$', r'^bw_a$', r'^write_mask_a$'],
-    'rdata_a': [r'^rdata_a$', r'^dout_a$', r'^q_a$', r'^data_out_a$'],
-    'cmd_b':   [r'^cmd_b$', r'^cenb$', r'^ce_b$', r'^cs_b$', r'^chip_en_b$'],
-    'addr_b':  [r'^addr_b$', r'^b_addr$', r'^addr_b_i$'],
-    'wdata_b': [r'^wdata_b$', r'^din_b$', r'^d_b$', r'^data_in_b$'],
-    'wem_b':   [r'^wem_b$', r'^we_b$', r'^bweb_b$', r'^bw_b$', r'^write_mask_b$'],
-    'rdata_b': [r'^rdata_b$', r'^dout_b$', r'^q_b$', r'^data_out_b$'],
+    'cmd_a':   [r'^cmd_a$', r'^cena$', r'^ce_a$', r'^cs_a$', r'^chip_en_a$',
+                r'^ceb_a?$', r'^csb_a?$', r'^cen_a$'],
+    'addr_a':  [r'^addr_a$', r'^a_addr$', r'^addr_a_i$', r'^addr_a_in$', r'^a$'],
+    'wdata_a': [r'^wdata_a$', r'^din_a$', r'^d_a$', r'^data_in_a$',
+                r'^data_i_a?$', r'^wdata_a_i$', r'^di_a$'],
+    'wem_a':   [r'^wem_a$', r'^bweb_a$', r'^bw_a$', r'^write_mask_a$',
+                r'^bm_a$', r'^byte_mask_a$', r'^bit_mask_a$'],
+    'rdata_a': [r'^rdata_a$', r'^dout_a$', r'^q_a$', r'^data_out_a$',
+                r'^data_o_a?$', r'^rdata_a_o$', r'^do_a$'],
+    'cmd_b':   [r'^cmd_b$', r'^cenb$', r'^ce_b$', r'^cs_b$', r'^chip_en_b$',
+                r'^ceb_b?$', r'^csb_b?$', r'^cen_b$'],
+    'addr_b':  [r'^addr_b$', r'^b_addr$', r'^addr_b_i$', r'^addr_b_in$', r'^b$'],
+    'wdata_b': [r'^wdata_b$', r'^din_b$', r'^d_b$', r'^data_in_b$',
+                r'^data_i_b?$', r'^wdata_b_i$', r'^di_b$'],
+    'wem_b':   [r'^wem_b$', r'^bweb_b$', r'^bw_b$', r'^write_mask_b$',
+                r'^bm_b$', r'^byte_mask_b$', r'^bit_mask_b$'],
+    'rdata_b': [r'^rdata_b$', r'^dout_b$', r'^q_b$', r'^data_out_b$',
+                r'^data_o_b?$', r'^rdata_b_o$', r'^do_b$'],
 }
 
 

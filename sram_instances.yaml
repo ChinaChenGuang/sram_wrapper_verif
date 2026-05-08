@@ -48,6 +48,15 @@ instances:
     data_width: 32
     enabled: true
 
+  # === Web-interface SRAM (1K×32) — ceb+web+data_i+data_o ===
+  - name: sram_web
+    module_name: sram_web
+    orig_path: rtl/orig/sram_web.sv
+    new_path: rtl/new/sram_web.sv
+    addr_width: 10
+    data_width: 32
+    enabled: true
+
   # === (kept for reference) ===
   - name: cpu_sys_256x182_mem_wrap
     module_name: cpu_sys_256x182_mem_wrap

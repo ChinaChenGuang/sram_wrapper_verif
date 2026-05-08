@@ -25,8 +25,8 @@ RUN_DIR      ?= run_dir
 DUT_SRCS     ?= ./rtl/dut_sram.sv
 DUT_SRCS     += ./rtl/dut_sram_v2.sv   # alternative "new" DUT
 
-# Pass DUT module names as Verilator defines
-DUT_DEFINES  = +define+DUT_ORI=$(DUT_ORI) +define+DUT_NEW=$(DUT_NEW)
+# Pass DUT module names as Verilator defines (overridable for USE_CONNECT mode)
+DUT_DEFINES  ?= +define+DUT_ORI=$(DUT_ORI) +define+DUT_NEW=$(DUT_NEW)
 
 # ================================================================
 # Include B2B generated targets (if generated)

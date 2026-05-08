@@ -87,15 +87,18 @@ def rename_module_in_file(src_path: Path, old_name: str, new_name: str, dst_path
 def generate_connect_snippet(ori_module: str, new_module: str,
                               instance_name: str,
                               addr_width: int, data_width: int,
-                              read_latency: int = 1) -> str:
+                              read_latency: int = 1,
+                              proto_type: int = 0) -> str:
     """Generate a unified `include connect snippet for tb_top.
     
-    Contains ALL three instantiations in ONE file:
+    Contains ALL instantiations in ONE file:
       - DUT original  (rdata → vif.rdata_*_ori)
       - DUT new       (rdata → vif.rdata_*_new)
       - SVA Checker   (vif)
     
-    This way waveform shows DUTs + checker side-by-side.
+    proto_type:
+      0 = standard cmd interface (ceb→cmd direct, tied web=0)
+      1 = WEB interface (ceb+web protocol, inline conversion)
     """
 
     lines = []
@@ -105,8 +108,27 @@ def generate_connect_snippet(ori_module: str, new_module: str,
     lines.append(f"// Ori:      {ori_module}")
     lines.append(f"// New:      {new_module}")
     lines.append(f"// Config:   AW={addr_width} DW={data_width}")
+    if proto_type == 1:
+        lines.append(f"// Proto:    WEB (ceb+web → cmd conversion inline)")
     lines.append("// ============================================================")
     lines.append("")
+
+    # ── Protocol conversion wires (WEB mode) ──
+    if proto_type == 1:
+        lines.append("// ── WEB Protocol wires (cmd→ceb/web conversion) ──")
+        lines.append("wire       ceb_a_ori, web_a_ori, ceb_b_ori, web_b_ori;")
+        lines.append("wire       ceb_a_new, web_a_new, ceb_b_new, web_b_new;")
+        lines.append("")
+        lines.append("// cmd → ceb/web: NOP→ceb=1, READ→ceb=0+web=1, WRITE→ceb=0+web=0")
+        lines.append("assign ceb_a_ori = (vif.cmd_a == 2'b00);")
+        lines.append("assign web_a_ori = (vif.cmd_a != 2'b10);")
+        lines.append("assign ceb_b_ori = (vif.cmd_b == 2'b00);")
+        lines.append("assign web_b_ori = (vif.cmd_b != 2'b10);")
+        lines.append("assign ceb_a_new = (vif.cmd_a == 2'b00);")
+        lines.append("assign web_a_new = (vif.cmd_a != 2'b10);")
+        lines.append("assign ceb_b_new = (vif.cmd_b == 2'b00);")
+        lines.append("assign web_b_new = (vif.cmd_b != 2'b10);")
+        lines.append("")
 
     # ── DUT Original ──
     lines.append("// ──────────────────────────────────────────────")
@@ -116,24 +138,46 @@ def generate_connect_snippet(ori_module: str, new_module: str,
     lines.append(f"    .ADDR_WIDTH ({addr_width}),")
     lines.append(f"    .DATA_WIDTH ({data_width})")
     lines.append(f") u_dut_ori (")
-    lines.extend([
-        "    .clk     (clk),",
-        "    .rst_n   (rst_n),",
-        "",
-        "    // Port A",
-        "    .cmd_a   (vif.cmd_a),",
-        "    .addr_a  (vif.addr_a),",
-        "    .wdata_a (vif.wdata_a),",
-        "    .wem_a   (vif.wem_a),",
-        "    .rdata_a (vif.rdata_a_ori),",
-        "",
-        "    // Port B",
-        "    .cmd_b   (vif.cmd_b),",
-        "    .addr_b  (vif.addr_b),",
-        "    .wdata_b (vif.wdata_b),",
-        "    .wem_b   (vif.wem_b),",
-        "    .rdata_b (vif.rdata_b_ori)",
-    ])
+
+    if proto_type == 1:
+        dut_ori_conn = [
+            "    .clk     (clk),",
+            "    .rst_n   (rst_n),",
+            "",
+            "    .ceb_a   (ceb_a_ori),",
+            "    .web_a   (web_a_ori),",
+            "    .addr_a  (vif.addr_a),",
+            "    .data_i_a(vif.wdata_a),",
+            "    .bw_a    (vif.wem_a),",
+            "    .data_o_a(vif.rdata_a_ori),",
+            "",
+            "    .ceb_b   (ceb_b_ori),",
+            "    .web_b   (web_b_ori),",
+            "    .addr_b  (vif.addr_b),",
+            "    .data_i_b(vif.wdata_b),",
+            "    .bw_b    (vif.wem_b),",
+            "    .data_o_b(vif.rdata_b_ori)",
+        ]
+    else:
+        dut_ori_conn = [
+            "    .clk     (clk),",
+            "    .rst_n   (rst_n),",
+            "",
+            "    // Port A",
+            "    .cmd_a   (vif.cmd_a),",
+            "    .addr_a  (vif.addr_a),",
+            "    .wdata_a (vif.wdata_a),",
+            "    .wem_a   (vif.wem_a),",
+            "    .rdata_a (vif.rdata_a_ori),",
+            "",
+            "    // Port B",
+            "    .cmd_b   (vif.cmd_b),",
+            "    .addr_b  (vif.addr_b),",
+            "    .wdata_b (vif.wdata_b),",
+            "    .wem_b   (vif.wem_b),",
+            "    .rdata_b (vif.rdata_b_ori)",
+        ]
+    lines.extend(dut_ori_conn)
     lines.append(");")
     lines.append("")
 
@@ -145,24 +189,46 @@ def generate_connect_snippet(ori_module: str, new_module: str,
     lines.append(f"    .ADDR_WIDTH ({addr_width}),")
     lines.append(f"    .DATA_WIDTH ({data_width})")
     lines.append(f") u_dut_new (")
-    lines.extend([
-        "    .clk     (clk),",
-        "    .rst_n   (rst_n),",
-        "",
-        "    // Port A",
-        "    .cmd_a   (vif.cmd_a),",
-        "    .addr_a  (vif.addr_a),",
-        "    .wdata_a (vif.wdata_a),",
-        "    .wem_a   (vif.wem_a),",
-        "    .rdata_a (vif.rdata_a_new),",
-        "",
-        "    // Port B",
-        "    .cmd_b   (vif.cmd_b),",
-        "    .addr_b  (vif.addr_b),",
-        "    .wdata_b (vif.wdata_b),",
-        "    .wem_b   (vif.wem_b),",
-        "    .rdata_b (vif.rdata_b_new)",
-    ])
+
+    if proto_type == 1:
+        dut_new_conn = [
+            "    .clk     (clk),",
+            "    .rst_n   (rst_n),",
+            "",
+            "    .ceb_a   (ceb_a_new),",
+            "    .web_a   (web_a_new),",
+            "    .addr_a  (vif.addr_a),",
+            "    .data_i_a(vif.wdata_a),",
+            "    .bw_a    (vif.wem_a),",
+            "    .data_o_a(vif.rdata_a_new),",
+            "",
+            "    .ceb_b   (ceb_b_new),",
+            "    .web_b   (web_b_new),",
+            "    .addr_b  (vif.addr_b),",
+            "    .data_i_b(vif.wdata_b),",
+            "    .bw_b    (vif.wem_b),",
+            "    .data_o_b(vif.rdata_b_new)",
+        ]
+    else:
+        dut_new_conn = [
+            "    .clk     (clk),",
+            "    .rst_n   (rst_n),",
+            "",
+            "    // Port A",
+            "    .cmd_a   (vif.cmd_a),",
+            "    .addr_a  (vif.addr_a),",
+            "    .wdata_a (vif.wdata_a),",
+            "    .wem_a   (vif.wem_a),",
+            "    .rdata_a (vif.rdata_a_new),",
+            "",
+            "    // Port B",
+            "    .cmd_b   (vif.cmd_b),",
+            "    .addr_b  (vif.addr_b),",
+            "    .wdata_b (vif.wdata_b),",
+            "    .wem_b   (vif.wem_b),",
+            "    .rdata_b (vif.rdata_b_new)",
+        ]
+    lines.extend(dut_new_conn)
     lines.append(");")
     lines.append("")
 
@@ -249,8 +315,7 @@ def generate_makefile_frag(instances: list, cfg: dict, enabled_only: bool = True
         lines.append(f"test-{name}:")
         lines.append(f"\t@ln -sf {name}_connect.sv {out_dir}/dut_connect.sv")
         lines.append(f"\t$(MAKE) clean build run \\")
-        lines.append(f"\t\tDUT_ORI=$(DUT_ORI_{name}) \\")
-        lines.append(f"\t\tDUT_NEW=$(DUT_NEW_{name}) \\")
+        lines.append(f"\t\tDUT_DEFINES=\"+define+USE_CONNECT\" \\")
         lines.append(f"\t\tADDR_WIDTH=$(AW_{name}) \\")
         lines.append(f"\t\tDATA_WIDTH=$(DW_{name}) \\")
         lines.append(f"\t\tDUT_SRCS=\"{out_dir}/{name}_ori.sv {out_dir}/{name}_new.sv\" \\")
@@ -460,7 +525,11 @@ def main():
         aw = inst["addr_width"]
         dw = inst["data_width"]
 
-        connect_sv = generate_connect_snippet(ori_mod, new_mod, name, aw, dw)
+        # Detect WEB-style interface by instance name or module name
+        is_web = 'web' in name.lower() or 'web' in inst.get('module_name', '').lower()
+        proto = 1 if is_web else 0
+
+        connect_sv = generate_connect_snippet(ori_mod, new_mod, name, aw, dw, proto_type=proto)
         connect_path = out_dir / f"{name}_connect.sv"
         if not args.dry_run:
             connect_path.write_text(connect_sv, encoding="utf-8")

@@ -58,8 +58,7 @@ module tb_top;
     //   MODE 2 (define):   +define+DUT_ORI=xxx +define+DUT_NEW=yyy
     // ----------------------------------------------------------
 `ifdef USE_CONNECT
-    `include "dut_ori_connect.sv"
-    `include "dut_new_connect.sv"
+    `include "dut_connect.sv"
 `else
 `ifdef DUT_ORI
     `DUT_ORI #(ADDR_WIDTH, DATA_WIDTH) dut_ori (
@@ -103,7 +102,9 @@ module tb_top;
     // ----------------------------------------------------------
     // SVA Checker
     // ----------------------------------------------------------
+    `ifndef USE_CONNECT
     mem_sva_checker #(ADDR_WIDTH, DATA_WIDTH, READ_LATENCY) checker_inst(vif);
+`endif
 
     // ----------------------------------------------------------
     // Waveform Dump

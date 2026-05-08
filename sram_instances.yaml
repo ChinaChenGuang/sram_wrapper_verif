@@ -1,63 +1,81 @@
 # ============================================================
 # SRAM Instances Configuration for Back-to-Back Verification
 # ============================================================
-# 描述所有需要做 A/B 对比测试的 SRAM 实例。
-# 当 original 和 new SRAM 的 module name 相同时，
-# gen_sram_b2b.py 会自动处理文件复制与 module 重命名。
-#
-# 字段说明:
-#   name        : SRAM instance 名称 (唯一标识)
-#   module_name : Verilog module 名称 (orig 和 new 同名)
-#   orig_path   : 原始(旧) SRAM RTL 文件路径
-#   new_path    : 新(替换) SRAM RTL 文件路径
-#   addr_width  : 地址位宽
-#   data_width  : 数据位宽
-#   enabled     : true/false, 是否参与回归
-# ============================================================
-
 instances:
-  # ---- 示例 1: CPU 系统 SRAM ----
+
+  # === SP: Single-Port (256×32) ===
+  - name: sram_sp
+    module_name: sram_sp
+    orig_path: rtl/orig/sram_sp.sv
+    new_path: rtl/new/sram_sp.sv
+    addr_width: 8
+    data_width: 32
+    enabled: true
+
+  # === SDP: Simple Dual-Port (512×64) ===
+  - name: sram_sdp
+    module_name: sram_sdp
+    orig_path: rtl/orig/sram_sdp.sv
+    new_path: rtl/new/sram_sdp.sv
+    addr_width: 9
+    data_width: 64
+    enabled: true
+
+  # === TDP: True Dual-Port (1K×32) ===
+  - name: sram_tdp
+    module_name: sram_tdp
+    orig_path: rtl/orig/sram_tdp.sv
+    new_path: rtl/new/sram_tdp.sv
+    addr_width: 10
+    data_width: 32
+    enabled: true
+
+  # === Bit-Write (2K×16) ===
+  - name: sram_bitwrite
+    module_name: sram_bitwrite
+    orig_path: rtl/orig/sram_bitwrite.sv
+    new_path: rtl/new/sram_bitwrite.sv
+    addr_width: 11
+    data_width: 16
+    enabled: true
+
+  # === 4-Bank Aggregated (1024×32) ===
+  - name: sram_bank4
+    module_name: sram_bank4
+    orig_path: rtl/orig/sram_bank4.sv
+    new_path: rtl/new/sram_bank4.sv
+    addr_width: 10
+    data_width: 32
+    enabled: true
+
+  # === (kept for reference) ===
   - name: cpu_sys_256x182_mem_wrap
     module_name: cpu_sys_256x182_mem_wrap
     orig_path: rtl/orig/cpu_sys_256x182_mem_wrap.sv
     new_path: rtl/new/cpu_sys_256x182_mem_wrap.sv
     addr_width: 8
     data_width: 182
-    enabled: true
+    enabled: false
 
-  # ---- 示例 2: GPU Cache SRAM ----
   - name: gpu_cache_1kx64_mem_wrap
     module_name: gpu_cache_1kx64_mem_wrap
     orig_path: rtl/orig/gpu_cache_1kx64_mem_wrap.sv
     new_path: rtl/new/gpu_cache_1kx64_mem_wrap.sv
     addr_width: 10
     data_width: 64
-    enabled: true
+    enabled: false
 
-  # ---- 示例 3: DMA Buffer SRAM ----
-  - name: dma_buf_4kx32_mem_wrap
-    module_name: dma_buf_4kx32_mem_wrap
-    orig_path: rtl/orig/dma_buf_4kx32_mem_wrap.sv
-    new_path: rtl/new/dma_buf_4kx32_mem_wrap.sv
-    addr_width: 12
-    data_width: 32
-    enabled: false  # 暂不参与回归
-
-  # ---- 示例 4: 当前项目已有的 dut_sram (演示用) ----
   - name: dut_sram
     module_name: dut_sram
     orig_path: rtl/dut_sram.sv
     new_path: rtl/dut_sram_v2.sv
     addr_width: 10
     data_width: 32
-    enabled: true
+    enabled: false
 
-# ============================================================
-# 全局设置
-# ============================================================
 global:
-  output_dir: gen           # 生成文件输出目录
-  ori_suffix: _ori          # original module 后缀
-  new_suffix: _new          # new module 后缀
-  makefile_frag: gen/sram_b2b_list.mk   # 生成的 Makefile 片段
-  regress_script: gen/regress_sram_b2b.sh  # 生成的回归脚本
+  output_dir: gen
+  ori_suffix: _ori
+  new_suffix: _new
+  makefile_frag: gen/sram_b2b_list.mk
+  regress_script: gen/regress_sram_b2b.sh

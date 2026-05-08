@@ -68,41 +68,47 @@ cd run_dir && ./Vtb_top \
     +CLK_JITTER_MODE=gaussian
 ```
 
-### 🔄 B2B 自动化 — 解决同名 Module 冲突 (Feature 2 & 3)
+### 🔄 B2B 批量处理 — 一键完成 module 改名 + 例化片段
 
-当 Original 和 Replacement SRAM 的 module name **完全相同**（如 `cpu_sys_256x182_mem_wrap`）时，自动处理文件复制、module 重命名、接口连线。
+当 Original 和 Replacement SRAM 的 module name **完全相同**（如 `cpu_sys_256x182_mem_wrap`）时，`make gen-b2b` 一条命令完成全部工作：
 
-#### 声明式配置
-
-```yaml
-# sram_instances.yaml
-instances:
-  - name: cpu_sys_256x182_mem_wrap
-    module_name: cpu_sys_256x182_mem_wrap   # orig 和 new 同名
-    orig_path: rtl/orig/cpu_sys_256x182_mem_wrap.sv
-    new_path: rtl/new/cpu_sys_256x182_mem_wrap.sv
-    addr_width: 8
-    data_width: 182
-    enabled: true
+```
+sram_instances.yaml
+        │
+        ▼  make gen-b2b
+        │
+        ├── gen/cpu_sram_ori.sv          (module cpu_sram → cpu_sram_ori)
+        ├── gen/cpu_sram_new.sv          (module cpu_sram → cpu_sram_new)
+        ├── gen/cpu_sram_ori_connect.sv  (`include 片段, rdata→_ori)
+        ├── gen/cpu_sram_new_connect.sv  (`include 片段, rdata→_new)
+        ├── gen/gpu_sram_ori.sv
+        ├── gen/gpu_sram_new.sv
+        ├── gen/gpu_sram_ori_connect.sv
+        ├── gen/gpu_sram_new_connect.sv
+        ├── gen/sram_b2b_list.mk         (Makefile 片段)
+        └── gen/regress_sram_b2b.sh      (回归脚本)
 ```
 
-#### 工作流
+#### tb_top 中使用
+
+```systemverilog
+// tb_top 中用 `include 替代原来的 ifdef DUT_ORI/DUT_NEW 块：
+`ifdef USE_CONNECT
+    `include "dut_ori_connect.sv"
+    `include "dut_new_connect.sv"
+`else
+    // ... legacy ifdef mode ...
+`endif
+```
 
 ```bash
-# 方式 1: 从 YAML 生成 (手动配置)
-vim sram_instances.yaml        # 编辑你的 SRAM 列表
-make gen-b2b                   # 生成 gen/*_ori.sv, gen/*_new.sv
+# 一键生成所有 B2B 文件
+make gen-b2b
 
-# 方式 2: 自动扫描目录 (无需手写 YAML)
-python3 scripts/gen_sram_wrapper.py scan --orig rtl/orig --new rtl/new --gen-yaml
-
-# 方式 3: 一键全流程 (scan + wrap + B2B)
-python3 scripts/gen_sram_wrapper.py full --orig rtl/orig --new rtl/new
-
-# 对单个 SRAM 实例测试
+# 对单个实例测试（自动 symlink 正确的 connect 文件）
 make test-cpu_sys_256x182_mem_wrap TEST=mem_sdp_test
 
-# 对全部 enabled 实例回归
+# 全量回归
 make regress-b2b TX_COUNT=200
 ```
 

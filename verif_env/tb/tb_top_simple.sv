@@ -51,8 +51,16 @@ module tb_top;
 
     // ----------------------------------------------------------
     // DUT Instances (A/B Test)
-    // Select modules via +define+DUT_ORI / +define+DUT_NEW
     // ----------------------------------------------------------
+    // Two modes, controlled by +define+USE_CONNECT:
+    //   MODE 1 (include):  `include generated connect snippets
+    //           make all DUT_SRCS="gen/xxx_ori.sv gen/xxx_new.sv"
+    //   MODE 2 (define):   +define+DUT_ORI=xxx +define+DUT_NEW=yyy
+    // ----------------------------------------------------------
+`ifdef USE_CONNECT
+    `include "dut_ori_connect.sv"
+    `include "dut_new_connect.sv"
+`else
 `ifdef DUT_ORI
     `DUT_ORI #(ADDR_WIDTH, DATA_WIDTH) dut_ori (
 `else
@@ -90,6 +98,7 @@ module tb_top;
         .wem_b  (vif.wem_b),
         .rdata_b(vif.rdata_b_new)
     );
+`endif
 
     // ----------------------------------------------------------
     // SVA Checker

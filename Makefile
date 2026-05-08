@@ -58,7 +58,7 @@ CLK_FLAGS    = $(if $(filter 1,$(JITTER)),+define+USE_CLK_GEN,)
 # Verilator flags
 VFLAGS_BASE = --binary --main --timing -j 4 --trace-fst --assert \
               -Wno-fatal -Wno-lint -Wno-style -Wno-SYMRSVDWORD -Wno-IGNOREDRETURN \
-              +incdir+./verif_env/tb $(CLK_FLAGS)
+              +incdir+./verif_env/tb +incdir+./gen $(CLK_FLAGS)
 
 # ================================================================
 # Single-Config Targets (default)

@@ -53,6 +53,13 @@ SRC_FEATURE = $(SRC_COMMON) \
               ./rtl/sram_ref_model.sv \
               ./verif_env/tb/tb_top_feature.sv
 
+SRC_DUALCLK = $(SRC_COMMON) \
+              ./rtl/clk_gen_dual.sv \
+              $(DUT_SRCS) \
+              ./rtl/sram_ref_model.sv \
+              ./verif_env/tb/mem_if_dualclk.sv \
+              ./verif_env/tb/tb_top_dualclk.sv
+
 # Clock jitter: 1=enable, 0=ideal clock
 CLK_FLAGS    = $(if $(filter 1,$(JITTER)),+define+USE_CLK_GEN,)
 
@@ -275,5 +282,26 @@ wave:
 clean:
 	@echo "==> Cleaning..."
 	rm -rf $(RUN_DIR)
+
+# ================================================================
+# Dual-Clock Targets
+# ================================================================
+.PHONY: build-dualclk run-dualclk sweep-clocks
+
+CLK_A_PS      ?= 10000
+CLK_B_PS      ?= 10000
+CLK_B_PHASE_PS ?= 0
+
+build-dualclk:
+	@echo "==> [DualClk] ORI=$(DUT_ORI) NEW=$(DUT_NEW) MODE=$(SRAM_MODE)"
+	mkdir -p $(RUN_DIR)
+	$(SIM) $(VFLAGS_BASE) $(DUT_DEFINES) $(SRC_DUALCLK) \
+		-GSRAM_MODE=$(SRAM_MODE) --top-module tb_top --Mdir $(RUN_DIR)
+
+run-dualclk:
+	@echo "==> [DualClk] Test=$(TEST) A=$(CLK_A_PS)ps B=$(CLK_B_PS)ps phase=$(CLK_B_PHASE_PS)ps"
+	cd $(RUN_DIR) && ./Vtb_top +TEST=$(TEST) \
+		+ADDR_WIDTH=$(ADDR_WIDTH) +DATA_WIDTH=$(DATA_WIDTH) +TX_COUNT=$(TX_COUNT) \
+		+CLK_A_PS=$(CLK_A_PS) +CLK_B_PS=$(CLK_B_PS) +CLK_B_PHASE_PS=$(CLK_B_PHASE_PS)
 
 .DEFAULT_GOAL := all

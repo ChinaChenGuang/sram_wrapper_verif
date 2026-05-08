@@ -17,6 +17,7 @@ DATA_WIDTH   ?= 32
 DUT_ORI      ?= dut_sram     # Original DUT module name
 DUT_NEW      ?= dut_sram     # New DUT module name (same or different)
 SRAM_MODE    ?= 2            # 0=SP, 1=SDP, 2=TDP (for ref model matching)
+NUM_PORTS    ?= 2            # 1=single-port, 2=dual-port
 JITTER       ?= 1            # 1=enable clock jitter (±5%), 0=disable
 WAVE_FILE    ?= dump.fst
 RUN_DIR      ?= run_dir
@@ -52,6 +53,14 @@ SRC_FEATURE = $(SRC_COMMON) \
               $(DUT_SRCS) \
               ./rtl/sram_ref_model.sv \
               ./verif_env/tb/tb_top_feature.sv
+
+SRC_DECOUPLED = $(SRC_COMMON) \
+              ./rtl/clk_gen_dual.sv \
+              $(DUT_SRCS) \
+              ./rtl/sram_ref_model.sv \
+              ./verif_env/tb/mem_port_if.sv \
+              ./verif_env/tb/mem_port_checker.sv \
+              ./verif_env/tb/tb_top_decoupled.sv
 
 SRC_DUALCLK = $(SRC_COMMON) \
               ./rtl/clk_gen_dual.sv \
@@ -269,6 +278,23 @@ gen-connect-pair:
 	@echo "==> Generating B2B connect pair..."
 	python3 scripts/gen_sram_wrapper.py connect $(ORI_FILE) --role ori -O dut_ori_connect -o gen
 	python3 scripts/gen_sram_wrapper.py connect $(NEW_FILE) --role new -O dut_new_connect -o gen
+
+# ================================================================
+# Decoupled Port Targets
+# ================================================================
+.PHONY: build-decoupled run-decoupled
+
+build-decoupled:
+	@echo "==> [Decoupled] ORI=$(DUT_ORI) NEW=$(DUT_NEW) PORTS=$(NUM_PORTS) MODE=$(SRAM_MODE)"
+	mkdir -p $(RUN_DIR)
+	$(SIM) $(VFLAGS_BASE) $(DUT_DEFINES) $(SRC_DECOUPLED) \
+		-GSRAM_MODE=$(SRAM_MODE) -GNUM_PORTS=$(NUM_PORTS) --top-module tb_top --Mdir $(RUN_DIR)
+
+run-decoupled:
+	@echo "==> [Decoupled] Test=$(TEST) PORTS=$(NUM_PORTS) cfg=$(ADDR_WIDTH)x$(DATA_WIDTH)"
+	cd $(RUN_DIR) && ./Vtb_top +TEST=$(TEST) \
+		+ADDR_WIDTH=$(ADDR_WIDTH) +DATA_WIDTH=$(DATA_WIDTH) +TX_COUNT=$(TX_COUNT) \
+		+CLK_A_PS=$(CLK_A_PS) +CLK_B_PS=$(CLK_B_PS) +CLK_B_PHASE_PS=$(CLK_B_PHASE_PS)
 
 # ================================================================
 # Common

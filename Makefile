@@ -172,7 +172,8 @@ SRC_UVM       = $(UVM_PKG) \
 UVM_DPI_SRC   = ./verif_env/dpi/uvm_dpi_verilator.c
 UVM_INCDIRS   = +incdir+$(UVM_SRC) +incdir+$(UVM_SRC)/dpi \
                 +incdir+$(UVM_SRC)/macros \
-                +incdir+./verif_env/uvc +incdir+./verif_env/tests
+                +incdir+./verif_env/uvc +incdir+./verif_env/uvc/classes \
+                +incdir+./verif_env/tests +incdir+./verif_env/tests/classes
 VFLAGS_UVM    = $(VFLAGS_BASE) -Wno-UNUSEDPARAM -Wno-UNUSEDSIGNAL \
                 -Wno-UNDRIVEN -Wno-PINCONNECTEMPTY \
                 $(UVM_INCDIRS)

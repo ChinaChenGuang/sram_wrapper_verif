@@ -161,9 +161,9 @@ module tb_top;
         uvm_config_db #(virtual mem_port_if #(MAX_ADDR_WIDTH, MAX_DATA_WIDTH))::set(
             null, "uvm_test_top.*", "port_b_vif", port_b);
 
-        // Bypass config_db: set global package variable for Verilator
-        mem_uvc_pkg::global_port_a_vif = port_a;
-        mem_uvc_pkg::global_port_b_vif = port_b;
+        // Bypass config_db: set global package variables for Verilator
+        mem_uvc_pkg::global_wr_vif = port_a;   // port_a = write
+        mem_uvc_pkg::global_rd_vif = port_b;   // port_b = read
 
         // Run UVM test
         if ($value$plusargs("UVM_TESTNAME=%s", test_name))

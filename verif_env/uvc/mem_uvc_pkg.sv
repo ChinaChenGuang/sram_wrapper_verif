@@ -19,7 +19,7 @@ package mem_uvc_pkg;
 
     // ============================================================
     // Global vif access (bypasses config_db for Verilator)
-    // Uses max-width to match tb_top interface width
+    // Matches tb_top MAX parameters (16, 256)
     // ============================================================
     virtual mem_port_if #(16, 256) global_port_a_vif;
     virtual mem_port_if #(16, 256) global_port_b_vif;
@@ -129,8 +129,8 @@ package mem_uvc_pkg;
         `uvm_component_param_utils(mem_driver #(ADDR_WIDTH, DATA_WIDTH))
 
         // Virtual interfaces (set via config_db)
-        virtual mem_port_if #(ADDR_WIDTH, DATA_WIDTH) port_a_vif;
-        virtual mem_port_if #(ADDR_WIDTH, DATA_WIDTH) port_b_vif;
+        virtual mem_port_if #(16, 256) port_a_vif;
+        virtual mem_port_if #(16, 256) port_b_vif;
 
         // Runtime mask (set by env, per config)
         logic [ADDR_WIDTH-1:0] addr_mask;
@@ -143,13 +143,15 @@ package mem_uvc_pkg;
 
         function void build_phase(uvm_phase phase);
             super.build_phase(phase);
-            // Use global package var (bypasses broken config_db in Verilator)
+            // Use global package var (bypasses config_db in Verilator)
             port_a_vif = global_port_a_vif;
             port_b_vif = global_port_b_vif;
+            if (port_a_vif == null || port_b_vif == null)
+                `uvm_fatal(get_type_name(), "global vif is null")
         endfunction
 
-        function void set_vif(virtual mem_port_if #(ADDR_WIDTH, DATA_WIDTH) pa,
-                               virtual mem_port_if #(ADDR_WIDTH, DATA_WIDTH) pb);
+        function void set_vif(virtual mem_port_if #(16, 256) pa,
+                               virtual mem_port_if #(16, 256) pb);
             port_a_vif = pa;
             port_b_vif = pb;
         endfunction
@@ -163,10 +165,6 @@ package mem_uvc_pkg;
         task run_phase(uvm_phase phase);
             mem_item #(ADDR_WIDTH, DATA_WIDTH) req;
             `uvm_info(get_type_name(), "Driver started", UVM_LOW)
-            
-            if (port_a_vif == null || port_b_vif == null) begin
-                `uvm_fatal(get_type_name(), "vif is null — cannot drive")
-            end
 
             forever begin
                 seq_item_port.get_next_item(req);

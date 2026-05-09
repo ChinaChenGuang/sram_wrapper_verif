@@ -32,7 +32,7 @@ package mem_test_pkg;
             for (int i = 0; i < num_tx; i++) begin
                 req = mem_item #(AW, DW)::type_id::create("req");
                 start_item(req);
-                void\'(req.randomize());
+                req.randomize();
                     `uvm_error("SEQ", "SP rand fail")
                 finish_item(req);
             end
@@ -51,7 +51,7 @@ package mem_test_pkg;
             for (int i = 0; i < num_tx; i++) begin
                 req = mem_item #(AW, DW)::type_id::create("req");
                 start_item(req);
-                void\'(req.randomize());
+                req.randomize();
                     `uvm_error("SEQ", "SDP rand fail")
                 finish_item(req);
             end
@@ -70,7 +70,7 @@ package mem_test_pkg;
             for (int i = 0; i < num_tx; i++) begin
                 req = mem_item #(AW, DW)::type_id::create("req");
                 start_item(req);
-                void\'(req.randomize());
+                req.randomize();
                     `uvm_error("SEQ", "TDP rand fail")
                 finish_item(req);
             end
@@ -89,7 +89,7 @@ package mem_test_pkg;
             for (int i = 0; i < num_tx; i++) begin
                 req = mem_item #(AW, DW)::type_id::create("req");
                 start_item(req);
-                void\'(req.randomize()); `uvm_error("SEQ", "WEM rand fail")
+                req.randomize(); `uvm_error("SEQ", "WEM rand fail")
                 finish_item(req);
             end
         endtask
@@ -108,12 +108,12 @@ package mem_test_pkg;
                 // Write
                 req = mem_item #(AW, DW)::type_id::create("req");
                 start_item(req);
-                void\'(req.randomize()); `uvm_error("SEQ", "B2B write rand fail")
+                req.randomize(); `uvm_error("SEQ", "B2B write rand fail")
                 finish_item(req);
                 // Read same addr
                 req = mem_item #(AW, DW)::type_id::create("req");
                 start_item(req);
-                void\'(req.randomize()); `uvm_error("SEQ", "B2B read rand fail")
+                req.randomize(); `uvm_error("SEQ", "B2B read rand fail")
                 finish_item(req);
             end
         endtask
@@ -133,7 +133,7 @@ package mem_test_pkg;
             for (int a = 0; a < depth; a++) begin
                 req = mem_item #(AW, DW)::type_id::create("req");
                 start_item(req);
-                void\'(req.randomize());
+                req.randomize();
                     `uvm_error("SEQ", "Fill rand fail")
                 finish_item(req);
             end
@@ -141,7 +141,7 @@ package mem_test_pkg;
             repeat (5) begin
                 req = mem_item #(AW, DW)::type_id::create("req");
                 start_item(req);
-                void\'(req.randomize());
+                req.randomize();
                     `uvm_error("SEQ", "Drain rand fail")
                 finish_item(req);
             end
@@ -149,7 +149,7 @@ package mem_test_pkg;
             for (int a = 0; a < depth; a++) begin
                 req = mem_item #(AW, DW)::type_id::create("req");
                 start_item(req);
-                void\'(req.randomize());
+                req.randomize();
                     `uvm_error("SEQ", "Verify rand fail")
                 finish_item(req);
             end

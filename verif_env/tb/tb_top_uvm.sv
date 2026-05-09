@@ -157,15 +157,22 @@ module tb_top;
     initial begin
         // Set virtual interfaces in config_db (max-width)
         uvm_config_db #(virtual mem_port_if #(MAX_ADDR_WIDTH, MAX_DATA_WIDTH))::set(
-            null, "*", "port_a_vif", port_a);
+            null, "uvm_test_top.*", "port_a_vif", port_a);
         uvm_config_db #(virtual mem_port_if #(MAX_ADDR_WIDTH, MAX_DATA_WIDTH))::set(
-            null, "*", "port_b_vif", port_b);
+            null, "uvm_test_top.*", "port_b_vif", port_b);
+
+        // Bypass config_db: set global package variable for Verilator
+        mem_uvc_pkg::global_port_a_vif = port_a;
+        mem_uvc_pkg::global_port_b_vif = port_b;
 
         // Run UVM test
         if ($value$plusargs("UVM_TESTNAME=%s", test_name))
             run_test(test_name);
         else
             run_test("test_mem_sp");
+
+        // Pass vif via config_db only for now
+        $display("[TB_TOP] config_db set done, aw=%0d dw=%0d", cfg_addr_width, cfg_data_width);
     end
 
 endmodule

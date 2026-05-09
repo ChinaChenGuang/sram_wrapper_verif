@@ -18,8 +18,11 @@ package mem_uvc_pkg;
     `include "uvm_macros.svh"
 
     // ============================================================
-    // Constants
+    // Global vif access (bypasses config_db for Verilator)
+    // Uses max-width to match tb_top interface width
     // ============================================================
+    virtual mem_port_if #(16, 256) global_port_a_vif;
+    virtual mem_port_if #(16, 256) global_port_b_vif;
     typedef enum logic [1:0] {
         MEM_NOP   = 2'b00,
         MEM_READ  = 2'b01,
@@ -140,11 +143,15 @@ package mem_uvc_pkg;
 
         function void build_phase(uvm_phase phase);
             super.build_phase(phase);
-            // Virtual interfaces set via config_db by tb_top
-            void'(uvm_config_db #(virtual mem_port_if #(ADDR_WIDTH, DATA_WIDTH))::get(
-                    this, "", "port_a_vif", port_a_vif));
-            void'(uvm_config_db #(virtual mem_port_if #(ADDR_WIDTH, DATA_WIDTH))::get(
-                    this, "", "port_b_vif", port_b_vif));
+            // Use global package var (bypasses broken config_db in Verilator)
+            port_a_vif = global_port_a_vif;
+            port_b_vif = global_port_b_vif;
+        endfunction
+
+        function void set_vif(virtual mem_port_if #(ADDR_WIDTH, DATA_WIDTH) pa,
+                               virtual mem_port_if #(ADDR_WIDTH, DATA_WIDTH) pb);
+            port_a_vif = pa;
+            port_b_vif = pb;
         endfunction
 
         function void set_masks(int cfg_aw, int cfg_dw);
@@ -153,10 +160,13 @@ package mem_uvc_pkg;
             wem_mask  = (1 << cfg_dw) - 1;
         endfunction
 
-        // Drive both ports (sequential to avoid fork in Verilator)
         task run_phase(uvm_phase phase);
             mem_item #(ADDR_WIDTH, DATA_WIDTH) req;
             `uvm_info(get_type_name(), "Driver started", UVM_LOW)
+            
+            if (port_a_vif == null || port_b_vif == null) begin
+                `uvm_fatal(get_type_name(), "vif is null — cannot drive")
+            end
 
             forever begin
                 seq_item_port.get_next_item(req);

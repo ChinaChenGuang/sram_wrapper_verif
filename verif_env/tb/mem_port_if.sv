@@ -1,11 +1,12 @@
 // ============================================================
-// mem_port_if - Single SRAM Port Interface
+// mem_port_if — SRAM Port Interface
 // ============================================================
-// Encapsulates one SRAM port's signals.
-// For dual-port SRAMs, instantiate TWO of these.
-// For single-port SRAMs, instantiate only port_a.
+// 1P: 例化一个 port_a, 连接 clk, rst_n(如果有)
+// 2P: 例化两个 port_a (write) + port_b (read)
 //
-// Each port has its own clock domain (clk).
+// ceb: 0=芯片使能, 1=禁用
+// web: 0=写, 1=读
+// wem: 0=写该位, 1=屏蔽
 // ============================================================
 
 `timescale 1ns/1ps
@@ -17,37 +18,35 @@ interface mem_port_if #(
     input logic clk,
     input logic rst_n
 );
-    // Control
-    logic [1:0]               cmd;       // 0=NOP 1=READ 2=WRITE
-    logic [ADDR_WIDTH-1:0]    addr;
-    logic [DATA_WIDTH-1:0]    wdata;
-    logic [DATA_WIDTH-1:0]    wem;       // 0=write, 1=mask
+    logic                       ceb;
+    logic                       web;
 
-    // A/B comparison outputs
-    logic [DATA_WIDTH-1:0]    rdata_ori;
-    logic [DATA_WIDTH-1:0]    rdata_new;
+    // Derived cmd for DUT connection
+    logic [1:0] cmd;
+    assign cmd = (!ceb && !web) ? 2'b10 : (!ceb && web) ? 2'b01 : 2'b00;
 
-    // Reference model output (optional, for feature checking)
-    logic [DATA_WIDTH-1:0]    rdata_ref;
+    logic [ADDR_WIDTH-1:0]      addr;
+    logic [DATA_WIDTH-1:0]      wdata;
+    logic [DATA_WIDTH-1:0]      wem;
+    logic [DATA_WIDTH-1:0]      rdata_ori;
+    logic [DATA_WIDTH-1:0]      rdata_new;
+    logic [DATA_WIDTH-1:0]      rdata_ref;
 
-    // Modport for driver (drives control, samples rdata)
     modport driver (
         input  clk, rst_n,
-        output cmd, addr, wdata, wem,
+        output ceb, web, addr, wdata, wem,
         input  rdata_ori, rdata_new, rdata_ref
     );
 
-    // Modport for DUT (receives control, drives rdata)
     modport dut (
         input  clk, rst_n,
-        input  cmd, addr, wdata, wem,
+        input  ceb, web, addr, wdata, wem,
         output rdata_ori
     );
 
-    // Modport for monitor (monitors all)
     modport monitor (
         input  clk, rst_n,
-        input  cmd, addr, wdata, wem,
+        input  ceb, web, addr, wdata, wem,
         input  rdata_ori, rdata_new, rdata_ref
     );
 

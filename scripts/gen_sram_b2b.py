@@ -1,576 +1,555 @@
 #!/usr/bin/env python3
 # ============================================================
-# gen_sram_b2b.py - SRAM Back-to-Back 文件自动生成器
+# gen_sram_b2b.py - SRAM Back-to-Back 文件生成器 v3
 # ============================================================
-# 解决痛点: 当 original 和 replacement SRAM 具有相同的 module name 时，
-# 无法在同一个 Verilator 编译单元中共存。
-#
-# 本脚本自动完成:
-#   1. 读取 sram_instances.yaml 配置文件
-#   2. 对每个 enabled 的实例:
-#      a. 复制 orig RTL → gen/<name>_ori.sv, 重命名 module → <name>_ori
-#      b. 复制 new  RTL → gen/<name>_new.sv, 重命名 module → <name>_new
-#   3. 生成 Makefile 片段 (sram_b2b_list.mk) 供主 Makefile include
-#   4. 生成回归脚本 (regress_sram_b2b.sh) 一键运行所有实例+测试
+# 读取 YAML 配置，扫描 RTL 文件，自动重命名所有 module 并生成
+# ori+new+checker 的 B2B 对比 connect 文件。
 #
 # 用法:
-#   python3 scripts/gen_sram_b2b.py                      # 生成所有文件
-#   python3 scripts/gen_sram_b2b.py --dry-run            # 预览，不实际写文件
-#   python3 scripts/gen_sram_b2b.py --instance cpu_sys   # 只生成指定实例
+#   python3 scripts/gen_sram_b2b.py --config sram_instances.yaml
+#   python3 scripts/gen_sram_b2b.py --dry-run
 # ============================================================
 
-import os
-import re
-import sys
-import argparse
+import os, re, sys, math, argparse
 from pathlib import Path
 
 try:
     import yaml
 except ImportError:
-    print("ERROR: PyYAML is required. Install with: pip3 install pyyaml")
+    print("ERROR: PyYAML required: pip3 install pyyaml")
     sys.exit(1)
 
-
-# ============================================================
-# Config
-# ============================================================
 SCRIPT_DIR = Path(__file__).parent.resolve()
-PROJ_ROOT  = SCRIPT_DIR.parent
+PROJ_ROOT = SCRIPT_DIR.parent
 CONFIG_YAML = PROJ_ROOT / "sram_instances.yaml"
 
+# ============================================================
+# 日志
+# ============================================================
 
-def load_config(path: Path) -> dict:
-    """加载 YAML 配置文件"""
-    with open(path, "r") as f:
-        return yaml.safe_load(f)
+class Logger:
+    def __init__(self, log_path=None):
+        self._lines = []
+        self._log_path = log_path
+
+    def write(self, msg=""):
+        self._lines.append(msg)
+        print(msg)
+
+    def save(self):
+        if self._log_path:
+            self._log_path.parent.mkdir(parents=True, exist_ok=True)
+            self._log_path.write_text("\n".join(self._lines) + "\n")
+
+# ============================================================
+# RTL 解析
+# ============================================================
+
+def parse_rtl_params(filepath: Path, log: Logger) -> dict:
+    if not filepath.exists():
+        log.write(f"  FAIL: parse_from 文件不存在: {filepath}")
+        return {}
+    content = filepath.read_text(encoding="utf-8", errors="replace")
+    params = {}
+
+    m = re.search(r'\bmodule\s+(\w+)', content)
+    if m:
+        params["module_name"] = m.group(1)
+
+    m = re.search(r'\bparameter\s+(?:RUNIOBIT|BUNIOBIT)\s*=\s*(\d+)', content)
+    if m:
+        params["data_width"] = int(m.group(1))
+
+    m = re.search(r'\bparameter\s+NUMWORD\s*=\s*(\d+)', content)
+    if m:
+        params["num_word"] = int(m.group(1))
+    if "num_word" not in params:
+        m = re.search(r'\b(?:local)?parameter\s+(?:NUMWORD|NUM_WORD|WORDS|DEPTH|NUM_W|NW)\s*=\s*(\d+)', content)
+        if m:
+            params["num_word"] = int(m.group(1))
+
+    m = re.search(r'\blocalparam\s+ADDR_WIDTH\s*=\s*\$?clog2\s*\(\s*NUMWORD\s*\)', content)
+    if m and "num_word" in params:
+        params["addr_width"] = math.ceil(math.log2(params["num_word"]))
+
+    m = re.search(r'\b(?:local)?parameter\s+ADDR_WIDTH\s*=\s*(\d+)', content)
+    if m:
+        params["addr_width"] = int(m.group(1))
+
+    return params
 
 
-def rename_module_in_file(src_path: Path, old_name: str, new_name: str, dst_path: Path) -> bool:
-    """复制文件并替换 module name
-    
-    替换规则:
-      - module <old_name>  →  module <new_name>
-      - endmodule           →  endmodule  // <new_name> (添加注释方便调试)
-    
-    Returns: True on success
-    """
+def scan_module_names(file_paths: list) -> set:
+    names = set()
+    for fp in file_paths:
+        p = Path(fp)
+        if not p.exists():
+            continue
+        content = p.read_text(encoding="utf-8", errors="replace")
+        for m in re.finditer(r'\bmodule\s+(\w+)', content):
+            names.add(m.group(1))
+    return names - {'endmodule', 'input', 'output', 'inout', 'parameter', 'localparam'}
+
+
+def rename_modules_in_file(src_path: Path, rename_map: dict, dst_path: Path, log: Logger) -> bool:
     if not src_path.exists():
-        print(f"  ERROR: Source file not found: {src_path}")
+        log.write(f"  FAIL: 源文件不存在: {src_path}")
         return False
 
     content = src_path.read_text(encoding="utf-8", errors="replace")
 
-    # 1. 替换 module 声明
-    pattern = re.compile(r'\bmodule\s+' + re.escape(old_name) + r'\b')
-    if not pattern.search(content):
-        print(f"  WARNING: Could not find 'module {old_name}' in {src_path}")
-    new_content = pattern.sub(f'module {new_name}', content)
+    for old_name in sorted(rename_map.keys(), key=len, reverse=True):
+        new_name = rename_map[old_name]
+        if old_name == new_name:
+            continue
+        content = re.sub(r'\bmodule\s+' + re.escape(old_name) + r'\b',
+                        f'module {new_name}', content)
+        content = re.sub(r'\b' + re.escape(old_name) + r'(?=\s*(?:#|\(|\s+\w+\s*\())',
+                        new_name, content)
 
-    # 2. 替换 endmodule 注释
-    new_content = re.sub(r'\bendmodule\b', f'endmodule  // {new_name}', new_content)
-
+    header = (f"// AUTO-GENERATED by gen_sram_b2b.py\n"
+              f"// Source: {src_path}\n"
+              f"// Renames: {', '.join(f'{k}→{v}' for k,v in rename_map.items() if k != v)}\n")
     dst_path.parent.mkdir(parents=True, exist_ok=True)
-
-    header = (
-        f"// ============================================================\n"
-        f"// AUTO-GENERATED by gen_sram_b2b.py - DO NOT EDIT MANUALLY\n"
-        f"// Source: {src_path}\n"
-        f"// Module: {old_name} -> {new_name}\n"
-        f"// ============================================================\n"
-    )
-    final = header + new_content
-    dst_path.write_text(final, encoding="utf-8")
+    dst_path.write_text(header + content, encoding="utf-8")
     return True
 
 
-def generate_connect_snippet(ori_module: str, new_module: str,
-                              instance_name: str,
-                              addr_width: int, data_width: int,
-                              read_latency: int = 1,
-                              proto_type: int = 0) -> str:
-    """Generate a unified `include connect snippet for tb_top.
-    
-    Contains ALL instantiations in ONE file:
-      - DUT original  (rdata → vif.rdata_*_ori)
-      - DUT new       (rdata → vif.rdata_*_new)
-      - SVA Checker   (vif)
-    
-    proto_type:
-      0 = standard cmd interface (ceb→cmd direct, tied web=0)
-      1 = WEB interface (ceb+web protocol, inline conversion)
+def load_filelist(path: Path) -> list:
+    if not path.exists():
+        return []
+    lines = path.read_text().splitlines()
+    result = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#') or line.startswith('+') or line.startswith('-'):
+            continue
+        result.append(line)
+    return result
+
+
+# ============================================================
+# 主函数
+# ============================================================
+
+def parse_module_ports(filepath: Path, LOG: Logger):
+    """Parse a Verilog module file, return ([ports], [params]).
+    Each port: {"name": str, "dir": "input"|"output"|"inout", "width": int}
+    Each param: {"name": str, "default": str or None}
     """
+    if not filepath or not filepath.exists():
+        return [], []
+    content = filepath.read_text(encoding="utf-8", errors="replace")
 
-    lines = []
-    lines.append("// ============================================================")
-    lines.append(f"// AUTO-GENERATED B2B connect — `include in tb_top")
-    lines.append(f"// Instance: {instance_name}")
-    lines.append(f"// Ori:      {ori_module}")
-    lines.append(f"// New:      {new_module}")
-    lines.append(f"// Config:   AW={addr_width} DW={data_width}")
-    if proto_type == 1:
-        lines.append(f"// Proto:    WEB (ceb+web → cmd conversion inline)")
-    lines.append("// ============================================================")
-    lines.append("")
+    # Find module body
+    m = re.search(r'module\s+\w+\s*(?:#[^)]*\))?\s*\(([^)]*)\)', content, re.DOTALL)
+    if not m:
+        LOG.write(f"  WARNING: 无法解析模块端口: {filepath.name}")
+        return [], []
 
-    # ── Protocol conversion wires (WEB mode) ──
-    if proto_type == 1:
-        lines.append("// ── WEB Protocol wires (cmd→ceb/web conversion) ──")
-        lines.append("wire       ceb_a_ori, web_a_ori, ceb_b_ori, web_b_ori;")
-        lines.append("wire       ceb_a_new, web_a_new, ceb_b_new, web_b_new;")
-        lines.append("")
-        lines.append("// cmd → ceb/web: NOP→ceb=1, READ→ceb=0+web=1, WRITE→ceb=0+web=0")
-        lines.append("assign ceb_a_ori = (vif.cmd_a == 2'b00);")
-        lines.append("assign web_a_ori = (vif.cmd_a != 2'b10);")
-        lines.append("assign ceb_b_ori = (vif.cmd_b == 2'b00);")
-        lines.append("assign web_b_ori = (vif.cmd_b != 2'b10);")
-        lines.append("assign ceb_a_new = (vif.cmd_a == 2'b00);")
-        lines.append("assign web_a_new = (vif.cmd_a != 2'b10);")
-        lines.append("assign ceb_b_new = (vif.cmd_b == 2'b00);")
-        lines.append("assign web_b_new = (vif.cmd_b != 2'b10);")
-        lines.append("")
+    ports_text = m.group(1)
 
-    # ── DUT Original ──
-    lines.append("// ──────────────────────────────────────────────")
-    lines.append(f"// DUT Original: {ori_module}")
-    lines.append("// ──────────────────────────────────────────────")
-    lines.append(f"{ori_module} #(")
-    lines.append(f"    .ADDR_WIDTH ({addr_width}),")
-    lines.append(f"    .DATA_WIDTH ({data_width})")
-    lines.append(f") u_dut_ori (")
+    # Parse parameters
+    params = []
+    for pm in re.finditer(r'parameter\s+(\w+)\s*=\s*([^,;\)]+)', content):
+        params.append({"name": pm.group(1), "default": pm.group(2).strip()})
 
-    if proto_type == 1:
-        dut_ori_conn = [
-            "    .clk     (clk),",
-            "    .rst_n   (rst_n),",
-            "",
-            "    .ceb_a   (ceb_a_ori),",
-            "    .web_a   (web_a_ori),",
-            "    .addr_a  (vif.addr_a),",
-            "    .data_i_a(vif.wdata_a),",
-            "    .bw_a    (vif.wem_a),",
-            "    .data_o_a(vif.rdata_a_ori),",
-            "",
-            "    .ceb_b   (ceb_b_ori),",
-            "    .web_b   (web_b_ori),",
-            "    .addr_b  (vif.addr_b),",
-            "    .data_i_b(vif.wdata_b),",
-            "    .bw_b    (vif.wem_b),",
-            "    .data_o_b(vif.rdata_b_ori)",
-        ]
-    else:
-        dut_ori_conn = [
-            "    .clk     (clk),",
-            "    .rst_n   (rst_n),",
-            "",
-            "    // Port A",
-            "    .cmd_a   (vif.cmd_a),",
-            "    .addr_a  (vif.addr_a),",
-            "    .wdata_a (vif.wdata_a),",
-            "    .wem_a   (vif.wem_a),",
-            "    .rdata_a (vif.rdata_a_ori),",
-            "",
-            "    // Port B",
-            "    .cmd_b   (vif.cmd_b),",
-            "    .addr_b  (vif.addr_b),",
-            "    .wdata_b (vif.wdata_b),",
-            "    .wem_b   (vif.wem_b),",
-            "    .rdata_b (vif.rdata_b_ori)",
-        ]
-    lines.extend(dut_ori_conn)
-    lines.append(");")
-    lines.append("")
-
-    # ── DUT New ──
-    lines.append("// ──────────────────────────────────────────────")
-    lines.append(f"// DUT New: {new_module}")
-    lines.append("// ──────────────────────────────────────────────")
-    lines.append(f"{new_module} #(")
-    lines.append(f"    .ADDR_WIDTH ({addr_width}),")
-    lines.append(f"    .DATA_WIDTH ({data_width})")
-    lines.append(f") u_dut_new (")
-
-    if proto_type == 1:
-        dut_new_conn = [
-            "    .clk     (clk),",
-            "    .rst_n   (rst_n),",
-            "",
-            "    .ceb_a   (ceb_a_new),",
-            "    .web_a   (web_a_new),",
-            "    .addr_a  (vif.addr_a),",
-            "    .data_i_a(vif.wdata_a),",
-            "    .bw_a    (vif.wem_a),",
-            "    .data_o_a(vif.rdata_a_new),",
-            "",
-            "    .ceb_b   (ceb_b_new),",
-            "    .web_b   (web_b_new),",
-            "    .addr_b  (vif.addr_b),",
-            "    .data_i_b(vif.wdata_b),",
-            "    .bw_b    (vif.wem_b),",
-            "    .data_o_b(vif.rdata_b_new)",
-        ]
-    else:
-        dut_new_conn = [
-            "    .clk     (clk),",
-            "    .rst_n   (rst_n),",
-            "",
-            "    // Port A",
-            "    .cmd_a   (vif.cmd_a),",
-            "    .addr_a  (vif.addr_a),",
-            "    .wdata_a (vif.wdata_a),",
-            "    .wem_a   (vif.wem_a),",
-            "    .rdata_a (vif.rdata_a_new),",
-            "",
-            "    // Port B",
-            "    .cmd_b   (vif.cmd_b),",
-            "    .addr_b  (vif.addr_b),",
-            "    .wdata_b (vif.wdata_b),",
-            "    .wem_b   (vif.wem_b),",
-            "    .rdata_b (vif.rdata_b_new)",
-        ]
-    lines.extend(dut_new_conn)
-    lines.append(");")
-    lines.append("")
-
-    # ── SVA Checker ──
-    lines.append("// ──────────────────────────────────────────────")
-    lines.append("// SVA Checker: compares rdata_ori === rdata_new")
-    lines.append("// ──────────────────────────────────────────────")
-    lines.append(f"mem_sva_checker #(")
-    lines.append(f"    .ADDR_WIDTH  ({addr_width}),")
-    lines.append(f"    .DATA_WIDTH  ({data_width}),")
-    lines.append(f"    .READ_LATENCY({read_latency})")
-    lines.append(f") u_sva_checker (vif);")
-    lines.append("")
-
-    return "\n".join(lines)
-
-
-def generate_makefile_frag(instances: list, cfg: dict, enabled_only: bool = True) -> str:
-    """生成 Makefile 片段"""
-    out_dir = cfg["global"]["output_dir"]
-    lines = []
-    lines.append("# ============================================================")
-    lines.append(f"# AUTO-GENERATED by gen_sram_b2b.py")
-    lines.append(f"# {len(instances)} SRAM instances registered")
-    lines.append("# ============================================================")
-    lines.append("")
-
-    # Collect all generated DUT source files (renamed modules)
-    dut_srcs = []
-    connect_files = []
-    for inst in instances:
-        if enabled_only and not inst.get("enabled", True):
+    # Parse ports
+    ports = []
+    # Remove comments
+    ports_text_clean = re.sub(r'//[^\n]*', '', ports_text)
+    # Split by comma, then parse each
+    port_entries = re.split(r'\s*,\s*', ports_text_clean)
+    for entry in port_entries:
+        entry = entry.strip()
+        if not entry:
             continue
-        name = inst["name"]
-        dut_srcs.append(f"{out_dir}/{name}_ori.sv")
-        dut_srcs.append(f"{out_dir}/{name}_new.sv")
-        connect_files.append(f"{out_dir}/{name}_connect.sv")
+        # Determine direction
+        direction = "input"
+        if entry.startswith("output"):
+            direction = "output"
+        elif entry.startswith("inout"):
+            direction = "inout"
 
-    lines.append("# All generated DUT source files (renamed modules)")
-    lines.append("GEN_DUT_SRCS = \\")
-    for i, s in enumerate(dut_srcs):
-        sep = " \\" if i < len(dut_srcs) - 1 else ""
-        lines.append(f"    {s}{sep}")
-    lines.append("")
+        # Extract name
+        name_m = re.search(r'(\w+)\s*$', entry)
+        if name_m:
+            ports.append({"name": name_m.group(1), "dir": direction})
 
-    lines.append("# All generated unified connect `include snippets (ori + new + checker)")
-    lines.append("GEN_CONNECT_SRCS = \\")
-    for i, s in enumerate(connect_files):
-        sep = " \\" if i < len(connect_files) - 1 else ""
-        lines.append(f"    {s}{sep}")
-    lines.append("")
-
-    # Per-instance variables
-    lines.append("# Per-instance DUT module names and connect files")
-    for i, inst in enumerate(instances):
-        if enabled_only and not inst.get("enabled", True):
-            continue
-        name = inst["name"]
-        lines.append(f"# Instance [{i}]: {name}")
-        lines.append(f"DUT_ORI_{name} = {name}_ori")
-        lines.append(f"DUT_NEW_{name} = {name}_new")
-        lines.append(f"AW_{name}     = {inst['addr_width']}")
-        lines.append(f"DW_{name}     = {inst['data_width']}")
-        lines.append(f"CONNECT_{name} = {out_dir}/{name}_connect.sv")
-        lines.append("")
-
-    # Convenience: list of all enabled instance names
-    enabled_names = [
-        inst["name"] for inst in instances
-        if enabled_only and inst.get("enabled", True)
-    ]
-    lines.append(f"# All enabled instance names (space-separated)")
-    lines.append(f"GEN_INSTANCES = {' '.join(enabled_names)}")
-    lines.append("")
-
-    # Test targets per instance
-    lines.append("# ============================================================")
-    lines.append("# Per-Instance Test Targets")
-    lines.append("# Usage: make test-<instance_name> TEST=mem_sdp_test")
-    lines.append("# Symlinks the unified connect file (ori+new+checker) → dut_connect.sv")
-    lines.append("# ============================================================")
-    for name in enabled_names:
-        lines.append(f".PHONY: test-{name}")
-        lines.append(f"test-{name}:")
-        lines.append(f"\t@ln -sf {name}_connect.sv {out_dir}/dut_connect.sv")
-        lines.append(f"\t$(MAKE) clean build run \\")
-        lines.append(f"\t\tDUT_DEFINES=\"+define+USE_CONNECT\" \\")
-        lines.append(f"\t\tADDR_WIDTH=$(AW_{name}) \\")
-        lines.append(f"\t\tDATA_WIDTH=$(DW_{name}) \\")
-        lines.append(f"\t\tDUT_SRCS=\"{out_dir}/{name}_ori.sv {out_dir}/{name}_new.sv\" \\")
-        lines.append(f"\t\tTEST=$(TEST)")
-        lines.append("")
-
-    # Regression target
-    lines.append("# ============================================================")
-    lines.append("# Full B2B Regression (all instances × all tests)")
-    lines.append("# ============================================================")
-    lines.append(".PHONY: regress-b2b")
-    lines.append("regress-b2b:")
-    lines.append(f"\t@bash {out_dir}/regress_sram_b2b.sh $$(TX_COUNT)")
-    lines.append("")
-
-    return "\n".join(lines)
+    LOG.write(f"  Parsed ports from {filepath.name}: {len(ports)} ports, {len(params)} params")
+    return ports, params
 
 
-def generate_regress_script(instances: list, cfg: dict, enabled_only: bool = True) -> str:
-    """生成回归 shell 脚本"""
-    out_dir = cfg["global"]["output_dir"]
-    lines = []
-    lines.append("#!/bin/bash")
-    lines.append("# ============================================================")
-    lines.append(f"# AUTO-GENERATED by gen_sram_b2b.py")
-    lines.append("# SRAM B2B Full Regression Script")
-    lines.append("# ============================================================")
-    lines.append("set -e")
-    lines.append("")
-    lines.append('TX_COUNT="${1:-100}"')
-    lines.append('RUN_DIR="${RUN_DIR:-run_dir}"')
-    lines.append("LOG_DIR=\"run_dir/logs\"")
-    lines.append("mkdir -p \"$LOG_DIR\"")
-    lines.append("")
+def map_port_to_tb(port: dict, postfix: str, all_ports: list) -> str:
+    """Map a module port to tb_top signal.
+    all_ports is used to detect 1P vs 2P mode.
+    """
+    name = port["name"]
+    direction = port["dir"]
 
-    # Test list
-    lines.append("TESTS=(")
-    lines.append('    "mem_sp_test"')
-    lines.append('    "mem_sdp_test"')
-    lines.append('    "mem_tdp_test"')
-    lines.append('    "mem_wem_walking_test"')
-    lines.append('    "mem_b2b_raw_test"')
-    lines.append(")")
-    lines.append("")
+    # Detect 1P vs 2P by looking for dual-port specific signals
+    port_names = {p["name"] for p in all_ports}
+    is_2p = "CLKW" in port_names or "CLKR" in port_names
 
-    lines.append("TOTAL_PASS=0")
-    lines.append("TOTAL_FAIL=0")
-    lines.append("")
+    # === 2P (Dual Port) ===
+    if is_2p:
+        if name == "CLKW":  return "clk_a"
+        if name == "CLKR":  return "clk_b"
+        if name == "RSTNW": return "rst_n"
+        if name == "RSTNR": return "rst_n"
+        if name == "WEB":   return "port_a.web"
+        if name == "REB":   return "port_b.web"
+        if name == "BWEB":  return "port_a.wem"
+        if name == "AA":    return "port_a.addr"
+        if name == "AB":    return "port_b.addr"
+        if name == "D":     return "port_a.wdata"
+        if name == "Q":     return f"port_b.rdata{postfix}"
+        if name == "CEB":   return "port_a.ceb"
 
-    # Per-instance loop
-    for inst in instances:
-        if enabled_only and not inst.get("enabled", True):
-            continue
-        name = inst["name"]
-        aw = inst["addr_width"]
-        dw = inst["data_width"]
-        lines.append(f"# ------------------------------------------------------")
-        lines.append(f"# Instance: {name}  ({1 << aw}x{dw}, AW={aw}, DW={dw})")
-        lines.append(f"# ------------------------------------------------------")
-        lines.append(f"echo \"\"")
-        lines.append(f"echo \"===== Instance: {name} (AW={aw} DW={dw}) =====\"")
-        lines.append(f"make clean build \\")
-        lines.append(f"    DUT_ORI={name}_ori \\")
-        lines.append(f"    DUT_NEW={name}_new \\")
-        lines.append(f"    ADDR_WIDTH={aw} \\")
-        lines.append(f"    DATA_WIDTH={dw} \\")
-        lines.append(f"    DUT_SRCS=\"{out_dir}/{name}_ori.sv {out_dir}/{name}_new.sv\"")
-        lines.append(f"if [ $? -ne 0 ]; then")
-        lines.append(f"    echo \"BUILD FAILED for {name}\"")
-        lines.append(f"    TOTAL_FAIL=$((TOTAL_FAIL + 1))")
-        lines.append(f"    continue")
-        lines.append(f"fi")
-        lines.append("")
-        lines.append(f"for t in \"${{TESTS[@]}}\"; do")
-        lines.append(f'    LOG="$LOG_DIR/${{t}}_{name}.log"')
-        lines.append(f'    echo -n "  $t ... "')
-        lines.append(f'    cd "$RUN_DIR" && ./Vtb_top +TEST="$t" +TX_COUNT="$TX_COUNT" > "../$LOG" 2>&1')
-        lines.append(f'    if grep -Eq "SVA ERROR|ERROR" "../$LOG"; then')
-        lines.append(f'        echo "FAIL"')
-        lines.append(f'        TOTAL_FAIL=$((TOTAL_FAIL + 1))')
-        lines.append(f'    else')
-        lines.append(f'        echo "PASS"')
-        lines.append(f'        TOTAL_PASS=$((TOTAL_PASS + 1))')
-        lines.append(f'    fi')
-        lines.append(f"done")
-        lines.append("")
+    # === 1P (Single Port) ===
+    if not is_2p:
+        if name == "CLK":   return "clk_a"
+        if name == "rstn":  return "rst_n"
+        if name == "CEB":   return "port_a.ceb"
+        if name == "WEB":   return "port_a.web"
+        if name == "BWEB":  return "port_a.wem"
+        if name == "A":     return "port_a.addr"
+        if name == "D":     return "port_a.wdata"
+        if name == "Q":     return f"port_a.rdata{postfix}"
 
-    lines.append("echo \"\"")
-    lines.append('echo "============================================================"')
-    lines.append('echo "B2B Regression Summary"')
-    lines.append('echo "  PASSED: $TOTAL_PASS"')
-    lines.append('echo "  FAILED: $TOTAL_FAIL"')
-    lines.append('echo "  TOTAL:  $((TOTAL_PASS + TOTAL_FAIL))"')
-    lines.append('echo "Logs: $LOG_DIR/"')
-    lines.append('echo "============================================================"')
-    lines.append("")
-    lines.append("exit $TOTAL_FAIL")
+    # === Common (legacy + lowercase port names) ===
+    name_map = {
+        "clk": "clk_a", "clk_a": "clk_a", "clk_b": "clk_b",
+        "rst_n": "rst_n", "rst": "rst_n", "reset_n": "rst_n",
+        "ceb": "port_a.ceb",
+        "web": "port_a.web",
+        "addr": "port_a.addr",
+        "wdata": "port_a.wdata",
+        "wem": "port_a.wem",
+        "cmd_a": "port_a.ceb", "cmd_b": "port_b.ceb",
+        "addr_a": "port_a.addr", "addr_b": "port_b.addr",
+        "wdata_a": "port_a.wdata", "wdata_b": "port_b.wdata",
+        "wem_a": "port_a.wem", "wem_b": "port_b.wem",
+        "rdata_a": f"port_a.rdata{postfix}", "rdata_b": f"port_b.rdata{postfix}",
+    }
+    if name in name_map:
+        return name_map[name]
 
-    return "\n".join(lines)
+    # === ECC / config ===
+    if name == "mem_cfg":
+        return "10'b0"
+    ecc_outputs = {"ecc_encoder_parity_out", "ecc_decoder_parity_out",
+                   "ecc_error_type", "latent_err", "mission_err"}
+    ecc_inputs  = {"ecc_encoder_bypass", "ecc_encoder_parity_in",
+                   "ecc_decoder_bypass", "fault_injection_enable", "fault_injection_value"}
+    if name in ecc_outputs:
+        return "/* */"
+    if name in ecc_inputs:
+        return "1'b0"
 
+    # === Default ===
+    if direction == "output" or direction == "inout":
+        return "/* */"
+    return "1'b0"
+
+
+# ============================================================
+# 主函数
+# ============================================================
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="SRAM Back-to-Back 文件自动生成器"
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true",
-        help="预览模式，不实际写文件"
-    )
-    parser.add_argument(
-        "--instance", type=str, default=None,
-        help="只处理指定 instance (按 name 过滤)"
-    )
-    parser.add_argument(
-        "--config", type=str, default=str(CONFIG_YAML),
-        help=f"配置文件路径 (默认: {CONFIG_YAML})"
-    )
+    parser = argparse.ArgumentParser(description="SRAM B2B Generator v3")
+    parser.add_argument("--config", type=str, default=str(CONFIG_YAML))
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--instance", type=str, default=None)
+    parser.add_argument("--log", type=str, default="")
     args = parser.parse_args()
 
     config_path = Path(args.config)
+    log_path = Path(args.log) if args.log else None
+    LOG = Logger(log_path)
+
+    LOG.write(f"gen_sram_b2b.py — config: {config_path}")
+    LOG.write()
+
     if not config_path.exists():
-        print(f"ERROR: Config file not found: {config_path}")
+        LOG.write(f"FAIL: 配置文件不存在: {config_path}")
+        LOG.write(f"  请先运行: python3 scripts/parse_memoris.py")
         sys.exit(1)
 
-    cfg = load_config(config_path)
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f)
+
     instances = cfg.get("instances", [])
+    if not instances:
+        LOG.write("FAIL: YAML 中没有 instances 配置")
+        sys.exit(1)
+
     global_cfg = cfg.get("global", {})
-
     out_dir = PROJ_ROOT / global_cfg.get("output_dir", "gen")
-    ori_suffix = global_cfg.get("ori_suffix", "_ori")
-    new_suffix = global_cfg.get("new_suffix", "_new")
+    ori_sfx = global_cfg.get("ori_suffix", "_ori")
+    new_sfx = global_cfg.get("new_suffix", "_new")
 
-    # Filter by instance name
     if args.instance:
         instances = [i for i in instances if args.instance in i["name"]]
         if not instances:
-            print(f"ERROR: No instance matching '{args.instance}' found")
+            LOG.write(f"FAIL: 没有匹配 '--instance {args.instance}' 的实例")
             sys.exit(1)
 
-    enabled_instances = [i for i in instances if i.get("enabled", True)]
-    disabled_instances = [i for i in instances if not i.get("enabled", True)]
+    enabled = [i for i in instances if i.get("enabled", True)]
+    disabled = [i for i in instances if not i.get("enabled", True)]
 
-    print("=" * 60)
-    print("SRAM B2B Generator")
-    print(f"  Config:    {config_path}")
-    print(f"  Output:    {out_dir}/")
-    print(f"  Instances: {len(enabled_instances)} enabled, {len(disabled_instances)} disabled")
-    print("=" * 60)
-
+    LOG.write(f"Instances: {len(enabled)} enabled, {len(disabled)} disabled")
+    LOG.write(f"Output:    {out_dir}/")
     if args.dry_run:
-        print("\n>>> DRY RUN MODE - No files will be written <<<\n")
+        LOG.write(">>> DRY RUN <<<")
 
-    # Phase 1: Generate renamed module files
-    ok_count = 0
-    fail_count = 0
+    all_gen_srcs = []
+    ok = fail = 0
+    failures = []  # track failure reasons per instance
 
-    for inst in enabled_instances:
+    for inst in enabled:
         name = inst["name"]
-        mod_name = inst.get("module_name", name)
-        orig_path = PROJ_ROOT / inst["orig_path"]
-        new_path  = PROJ_ROOT / inst["new_path"]
+        inst_fails = []
+        LOG.write(f"\n{'─'*50}")
+        LOG.write(f"── {name}")
+        LOG.write(f"{'─'*50}")
 
-        print(f"\n[{name}]")
-        print(f"  Module: {mod_name}")
-        print(f"  Orig:   {orig_path}")
-        print(f"  New:    {new_path}")
-        print(f"  Config: AW={inst['addr_width']}, DW={inst['data_width']}")
+        # ── 解析参数 ──
+        parse_from = inst.get("parse_from") or inst.get("orig_path") or f"rtl/orig/{name}.v"
+        parse_path = (PROJ_ROOT / parse_from) if not Path(parse_from).is_absolute() else Path(parse_from)
 
-        ori_mod = f"{mod_name}{ori_suffix}"
-        new_mod = f"{mod_name}{new_suffix}"
+        params = parse_rtl_params(parse_path, LOG)
+        if not params or "module_name" not in params:
+            reason = f"参数解析失败: parse_from={parse_path}"
+            LOG.write(f"  FAIL: {reason}")
+            inst_fails.append(reason)
+            fail += 1
+            failures.append((name, inst_fails))
+            continue
 
-        dst_ori = out_dir / f"{name}_ori.sv"
-        dst_new = out_dir / f"{name}_new.sv"
+        mod_name = params.get("module_name", name)
+        dw = params.get("data_width", inst.get("data_width", "?"))
+        aw = params.get("addr_width", inst.get("addr_width", "?"))
 
-        if not args.dry_run:
-            # Original → _ori
-            if rename_module_in_file(orig_path, mod_name, ori_mod, dst_ori):
-                print(f"  ✓  {dst_ori.name}  ({mod_name} → {ori_mod})")
-                ok_count += 1
-            else:
-                fail_count += 1
+        LOG.write(f"  Module:   {mod_name}")
+        LOG.write(f"  Params:   数据位宽={dw}  深度={1<<aw if isinstance(aw,int) else '?'}  AW={aw}")
 
-            # New → _new
-            if rename_module_in_file(new_path, mod_name, new_mod, dst_new):
-                print(f"  ✓  {dst_new.name}  ({mod_name} → {new_mod})")
-                ok_count += 1
-            else:
-                fail_count += 1
+        # ── 收集文件 ──
+        inst_data = {}
+        for side, sfx in [("orig", ori_sfx), ("new", new_sfx)]:
+            files = []
+
+            # 1) Primary wrapper
+            primary = inst.get(f"{side}_path", f"rtl/{side}/{name}.v")
+            p = str(PROJ_ROOT / primary) if not Path(primary).is_absolute() else primary
+            files.append(p)
+
+            # 2) Filelist
+            fl_path = inst.get(f"{side}_filelist", "")
+            if fl_path:
+                fl_abs = str(PROJ_ROOT / fl_path) if not Path(fl_path).is_absolute() else fl_path
+                mem_files = load_filelist(Path(fl_abs))
+                if not mem_files:
+                    reason = f"[{side}] filelist 为空或不存在: {fl_path}"
+                    LOG.write(f"  WARNING: {reason}")
+                for mf in mem_files:
+                    mf_path = str(PROJ_ROOT / mf) if not Path(mf).is_absolute() else mf
+                    files.append(mf_path)
+
+            # 3) Extra files (auto-discovered by parse_memoris.py)
+            for xf in inst.get(f"{side}_extra", []):
+                xf_path = str(PROJ_ROOT / xf) if not Path(xf).is_absolute() else xf
+                files.append(xf_path)
+
+            # 4) Resolve
+            file_paths = []
+            missing = []
+            for f in files:
+                p = Path(f)
+                if p.exists():
+                    file_paths.append(p)
+                else:
+                    missing.append(f)
+            if missing:
+                reason = f"[{side}] 文件不存在:\n    " + "\n    ".join(str(m) for m in missing[:5])
+                if len(missing) > 5:
+                    reason += f"\n    ... +{len(missing)-5} more"
+                LOG.write(f"  FAIL: {reason}")
+                inst_fails.append(reason)
+
+            if not file_paths:
+                LOG.write(f"  FAIL: [{side}] 无可用文件")
+                inst_fails.append(f"[{side}] 无可用文件")
+                fail += 1
+                continue
+
+            # 5) Scan modules
+            all_mods = scan_module_names(file_paths)
+            if not all_mods:
+                reason = f"[{side}] 未找到任何 module 声明（文件可能不是 RTL）"
+                LOG.write(f"  FAIL: {reason}")
+                LOG.write(f"    文件列表: {','.join(p.name for p in file_paths[:10])}")
+                inst_fails.append(reason)
+                fail += 1
+                continue
+
+            rename_map = {m: f"{m}{sfx}" for m in all_mods}
+            LOG.write(f"  [{side}] {len(file_paths)} files, {len(rename_map)} modules")
+            for k, v in sorted(rename_map.items()):
+                if k != v:
+                    LOG.write(f"    {k} → {v}")
+
+            inst_data[side] = (file_paths, rename_map)
+
+        # ── 检查两侧都成功 ──
+        if "orig" not in inst_data or "new" not in inst_data:
+            reason = f"缺少 {'new' if 'orig' in inst_data else 'orig'} 侧数据"
+            LOG.write(f"  FAIL: {reason}")
+            inst_fails.append(reason)
+            fail += 1
+            failures.append((name, inst_fails))
+            continue
+
+        # ── 生成重命名文件 ──
+        for side, sfx in [("orig", ori_sfx), ("new", new_sfx)]:
+            file_paths, rename_map = inst_data[side]
+            for src_path in file_paths:
+                stem = src_path.stem
+                dst_name = f"{stem}_{side}.v"
+                dst_path = out_dir / dst_name
+
+                if args.dry_run:
+                    LOG.write(f"  → {dst_name}")
+                    ok += 1
+                else:
+                    if rename_modules_in_file(src_path, rename_map, dst_path, LOG):
+                        LOG.write(f"  ✓ {dst_name}")
+                        all_gen_srcs.append(dst_path)
+                        ok += 1
+                    else:
+                        reason = f"重命名失败: {src_path.name}"
+                        LOG.write(f"  FAIL: {reason}")
+                        inst_fails.append(reason)
+                        fail += 1
+
+        # ── 生成 connect snippet (parse real wrapper ports) ──
+        ori_top = f"{mod_name}{ori_sfx}"
+        new_top = f"{mod_name}{new_sfx}"
+
+        wrapper_file = Path(inst.get("orig_path", f"rtl/orig/{name}.v"))
+        if not wrapper_file.exists():
+            wrapper_file = inst_data.get("orig") and inst_data["orig"][0][0]
+        if wrapper_file and wrapper_file.exists():
+            ports, params = parse_module_ports(wrapper_file, LOG)
         else:
-            print(f"  [DRY-RUN] Would create: {dst_ori}  ({mod_name} → {ori_mod})")
-            print(f"  [DRY-RUN] Would create: {dst_new}  ({mod_name} → {new_mod})")
-            ok_count += 2
+            ports, params = [], []
+            LOG.write(f"  WARNING: 无法解析 wrapper 端口，使用默认模板")
 
-    if fail_count > 0:
-        print(f"\nERROR: {fail_count} file(s) failed.")
-        sys.exit(1)
+        connect_lines = [
+            "// AUTO-GENERATED B2B connect",
+            f"// {ori_top} vs {new_top}",
+            "",
+            f"// Usage: compile with +define+SIM_{name} to enable this instance",
+            f"//        or +define+SIM_ALL to enable all instances",
+            f"`ifdef SIM_{name}",
+            f"`ifndef SIM_ALL",
+            f"    `define SIM_ALL  // also enable ALL flag",
+            f"`endif",
+            f"`endif",
+            f"`ifdef SIM_ALL",
+            "",
+            f"// Instance-specific data mask ({dw} bits)",
+            f"logic [{dw}-1:0] data_mask_{name} = '1;",
+            ""]
 
-    # Phase 2: Generate unified connect `include snippets (ori + new + checker)
-    print(f"\n{'='*60}")
-    print("Phase 2: Generating unified connect `include snippets")
-    print("         (ori + new + checker in one file)")
-    print(f"{'='*60}")
-    for inst in enabled_instances:
-        name = inst["name"]
-        ori_mod = f"{inst.get('module_name', name)}{ori_suffix}"
-        new_mod = f"{inst.get('module_name', name)}{new_suffix}"
-        aw = inst["addr_width"]
-        dw = inst["data_width"]
+        for side, top_mod, postfix in [("ori", ori_top, "_ori"), ("new", new_top, "_new")]:
+            tag = "DUT ORI" if side == "ori" else "DUT NEW"
+            connect_lines.append(f"  // {tag}: {top_mod}")
+            # Parameter list — use known values, fallback to default from RTL
+            if params:
+                pvals = []
+                for p in params:
+                    pname = p['name']
+                    # Use parsed value if available
+                    if pname in ('ADDR_WIDTH', 'AW', 'ADDR_W'):
+                        val = str(aw) if isinstance(aw, int) else p.get('default', '?')
+                    elif pname in ('DATA_WIDTH', 'DW', 'DATA_W'):
+                        val = str(dw) if isinstance(dw, int) else p.get('default', '?')
+                    else:
+                        val = p.get('default', '?')
+                    pvals.append(f"    .{pname} ({val})")
+                connect_lines.append(f"{top_mod} #(")
+                connect_lines.append(",\n".join(pvals))
+                connect_lines.append(f") u_dut_{side}_{name} (")
+            else:
+                connect_lines.append(f"{top_mod} u_dut_{side}_{name} (")
+            # Port list - map to tb signals
+            pconnects = []
+            for p in ports:
+                tb_signal = map_port_to_tb(p, postfix, ports)
+                pconnects.append(f"    .{p['name']} ({tb_signal})")
+            connect_lines.append(",\n".join(pconnects))
+            connect_lines.append(f");\n")
 
-        # Detect WEB-style interface by instance name or module name
-        is_web = 'web' in name.lower() or 'web' in inst.get('module_name', '').lower()
-        proto = 1 if is_web else 0
+        # Checker — uses instance-specific data_mask
+        connect_lines.append(f"// ── Checker: {name} ──")
+        connect_lines.append(f"mem_port_checker #({dw}, 1, 1, \"{name.upper()}\") u_chk_{name} (")
+        connect_lines.append(f"    .vif       (port_a.monitor),")
+        connect_lines.append(f"    .data_mask (data_mask_{name})")
+        connect_lines.append(f");")
+        connect_lines.append(f"`endif  // SIM_ALL / SIM_{name}")
+        connect_lines.append("")
 
-        connect_sv = generate_connect_snippet(ori_mod, new_mod, name, aw, dw, proto_type=proto)
         connect_path = out_dir / f"{name}_connect.sv"
         if not args.dry_run:
-            connect_path.write_text(connect_sv, encoding="utf-8")
-            print(f"  ✓  {connect_path.name}  ({ori_mod} + {new_mod} + checker)")
+            connect_path.write_text("\n".join(connect_lines))
+            LOG.write(f"  ✓ {name}_connect.sv")
         else:
-            print(f"  [DRY-RUN] Would create: {connect_path.name}")
+            LOG.write(f"  → {name}_connect.sv")
 
-    # Phase 3: Generate Makefile fragment
-    mk_frag = PROJ_ROOT / global_cfg.get("makefile_frag", "gen/sram_b2b_list.mk")
-    mk_content = generate_makefile_frag(instances, cfg)
-    if not args.dry_run:
-        mk_frag.parent.mkdir(parents=True, exist_ok=True)
-        mk_frag.write_text(mk_content, encoding="utf-8")
-        print(f"\n✓  Makefile fragment: {mk_frag}")
-    else:
-        print(f"\n[DRY-RUN] Would create: {mk_frag}")
+        if inst_fails:
+            failures.append((name, inst_fails))
 
-    # Phase 3: Generate regression script
-    reg_script = PROJ_ROOT / global_cfg.get("regress_script", "gen/regress_sram_b2b.sh")
-    reg_content = generate_regress_script(instances, cfg)
-    if not args.dry_run:
-        reg_script.parent.mkdir(parents=True, exist_ok=True)
-        reg_script.write_text(reg_content, encoding="utf-8")
-        reg_script.chmod(0o755)
-        print(f"✓  Regression script: {reg_script}")
-    else:
-        print(f"[DRY-RUN] Would create: {reg_script}")
+    # ── Generate all_connect.sv summary ──
+    connect_files = sorted(f for f in out_dir.glob("*_connect.sv") if f.name != "all_connect.sv")
+    if not args.dry_run and connect_files:
+        summary_path = out_dir / "all_connect.sv"
+        lines = ["// AUTO-GENERATED by gen_sram_b2b.py",
+                 "// Include this file in tb_top.sv to instantiate all DUT pairs",
+                 "// Usage: `include \"gen/all_connect.sv\"",
+                 ""]
+        for cf in connect_files:
+            lines.append(f'`include "{cf.name}"')
+        summary_path.write_text("\n".join(lines))
+        LOG.write(f"\n✓ all_connect.sv (includes {len(connect_files)} connect files)")
 
-    # Summary
-    print(f"\n{'='*60}")
-    print(f"Done. {ok_count} files generated for {len(enabled_instances)} instance(s).")
-    print(f"\nNext steps:")
-    print(f"  1. Verify generated files in {out_dir}/")
-    print(f"  2. Run single instance test:")
-    for inst in enabled_instances[:3]:  # show first 3
-        print(f"     make test-{inst['name']} TEST=mem_sdp_test")
-    if len(enabled_instances) > 3:
-        print(f"     ... and {len(enabled_instances)-3} more")
-    print(f"  3. Run full regression:")
-    print(f"     make regress-b2b TX_COUNT=200")
-    print(f"{'='*60}")
+    # ── 生成 filelist ──
+    fl_path = out_dir / "gen_sram_b2b.f"
+    if not args.dry_run and all_gen_srcs:
+        with open(fl_path, "w") as f:
+            for src in sorted(set(all_gen_srcs)):
+                f.write(f"{src}\n")
+        LOG.write(f"\n✓ Filelist: {fl_path}")
+
+    # ── 总结 ──
+    LOG.write(f"\n{'='*50}")
+    LOG.write(f"结果: {ok} 成功, {fail} 失败")
+
+    if failures:
+        LOG.write(f"\n失败详情:")
+        for name, reasons in failures:
+            LOG.write(f"  [{name}]")
+            for r in reasons:
+                LOG.write(f"    - {r}")
+
+    if enabled and ok > 0:
+        e = enabled[0]
+        LOG.write(f"\n下一步:")
+        LOG.write(f"  make build-vcs DUT_ORI={e['name']}_ori DUT_NEW={e['name']}_new \\")
+        LOG.write(f"    ADDR_WIDTH={e.get('addr_width','auto')} DATA_WIDTH={e.get('data_width','auto')}")
+
+    LOG.save()
 
 
 if __name__ == "__main__":

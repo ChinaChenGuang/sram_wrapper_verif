@@ -27,9 +27,15 @@ uvm_lib/
 uvm_lib_verilator/
 uvm_lib_verilator2/
 
+# Python
+__pycache__/
+
 # Editor
 *.swp
 *.swo
 *~
 .vscode/
 .idea/
+
+# Nested repos
+docker-synopsys/

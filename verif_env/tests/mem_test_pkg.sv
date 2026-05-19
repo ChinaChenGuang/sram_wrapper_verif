@@ -1,6 +1,7 @@
 // ============================================================
-// mem_test_pkg — SRAM Test Package v2 (Read/Write Split)
+// mem_test_pkg — SRAM Test Package (Unified mem_item)
 // ============================================================
+
 `ifndef MEM_TEST_PKG_SV
 `define MEM_TEST_PKG_SV
 
@@ -24,6 +25,7 @@ package mem_test_pkg;
 endpackage : mem_test_pkg
 
 // Global scope concrete tests
+import uvm_pkg::*;
 import mem_test_pkg::*;
 
 `include "test_mem_sp.sv"

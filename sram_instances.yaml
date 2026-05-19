@@ -1,90 +1,39 @@
 # ============================================================
-# SRAM Instances Configuration for Back-to-Back Verification
+# SRAM B2B 实例配置
 # ============================================================
+#
+# 文件层次:
+#   exp1_mem_wrap.v    ← 顶层 wrapper (解析 RUNIOBIT, NUMWORD)
+#     └─ exp1_low_mem_wrap.v       ← 在 mem_lib filelist 里
+#          └─ mem_lib/*.v          ← 在 mem_lib filelist 里
+#
+# 你只需提供:
+#   parse_from    → 顶层 _mem_wrap.v (自动提取位宽参数)
+#   orig_path     → orig 顶层 wrapper
+#   orig_filelist → orig mem_lib filelist (含 sub_wrapper + 所有 mem)
+#   new_path      → new 顶层 wrapper
+#   new_filelist  → new mem_lib filelist
+# ============================================================
+
 instances:
 
-  # === SP: Single-Port (256×32) ===
-  - name: sram_sp
-    module_name: sram_sp
-    orig_path: rtl/orig/sram_sp.sv
-    new_path: rtl/new/sram_sp.sv
-    addr_width: 8
-    data_width: 32
+  - name: exp1_mem_wrap
+    parse_from: orig/exp1_mem_wrap.v         # 解析 RUNIOBIT, NUMWORD
+    orig_path:  orig/exp1_mem_wrap.v         # orig 顶层
+    orig_filelist: orig/mem_lib/files.f      # sub_wrapper + mem 都在这里
+    new_path:   new/exp1_mem_wrap.v          # new 顶层
+    new_filelist: new/mem_lib/files.f        # new sub_wrapper + mem
     enabled: true
 
-  # === SDP: Simple Dual-Port (512×64) ===
-  - name: sram_sdp
-    module_name: sram_sdp
-    orig_path: rtl/orig/sram_sdp.sv
-    new_path: rtl/new/sram_sdp.sv
-    addr_width: 9
-    data_width: 64
-    enabled: true
-
-  # === TDP: True Dual-Port (1K×32) ===
-  - name: sram_tdp
-    module_name: sram_tdp
-    orig_path: rtl/orig/sram_tdp.sv
-    new_path: rtl/new/sram_tdp.sv
-    addr_width: 10
-    data_width: 32
-    enabled: true
-
-  # === Bit-Write (2K×16) ===
-  - name: sram_bitwrite
-    module_name: sram_bitwrite
-    orig_path: rtl/orig/sram_bitwrite.sv
-    new_path: rtl/new/sram_bitwrite.sv
-    addr_width: 11
-    data_width: 16
-    enabled: true
-
-  # === 4-Bank Aggregated (1024×32) ===
-  - name: sram_bank4
-    module_name: sram_bank4
-    orig_path: rtl/orig/sram_bank4.sv
-    new_path: rtl/new/sram_bank4.sv
-    addr_width: 10
-    data_width: 32
-    enabled: true
-
-  # === Web-interface SRAM (1K×32) — ceb+web+data_i+data_o ===
-  - name: sram_web
-    module_name: sram_web
-    orig_path: rtl/orig/sram_web.sv
-    new_path: rtl/new/sram_web.sv
-    addr_width: 10
-    data_width: 32
-    enabled: true
-
-  # === (kept for reference) ===
-  - name: cpu_sys_256x182_mem_wrap
-    module_name: cpu_sys_256x182_mem_wrap
-    orig_path: rtl/orig/cpu_sys_256x182_mem_wrap.sv
-    new_path: rtl/new/cpu_sys_256x182_mem_wrap.sv
-    addr_width: 8
-    data_width: 182
-    enabled: false
-
-  - name: gpu_cache_1kx64_mem_wrap
-    module_name: gpu_cache_1kx64_mem_wrap
-    orig_path: rtl/orig/gpu_cache_1kx64_mem_wrap.sv
-    new_path: rtl/new/gpu_cache_1kx64_mem_wrap.sv
-    addr_width: 10
-    data_width: 64
-    enabled: false
-
-  - name: dut_sram
-    module_name: dut_sram
-    orig_path: rtl/dut_sram.sv
-    new_path: rtl/dut_sram_v2.sv
-    addr_width: 10
-    data_width: 32
-    enabled: false
+  # - name: exp2_mem_wrap
+  #   parse_from: orig/exp2_mem_wrap.v
+  #   orig_path:  orig/exp2_mem_wrap.v
+  #   orig_filelist: orig/mem_lib/exp2_files.f
+  #   new_path:   new/exp2_mem_wrap.v
+  #   new_filelist: new/mem_lib/exp2_files.f
+  #   enabled: true
 
 global:
   output_dir: gen
   ori_suffix: _ori
   new_suffix: _new
-  makefile_frag: gen/sram_b2b_list.mk
-  regress_script: gen/regress_sram_b2b.sh

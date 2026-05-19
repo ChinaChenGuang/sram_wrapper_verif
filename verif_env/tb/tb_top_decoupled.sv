@@ -134,10 +134,10 @@ module tb_top;
     // ----------------------------------------------------------
     sram_ref_model #(MAX_ADDR_WIDTH, MAX_DATA_WIDTH, READ_LATENCY, SRAM_MODE) ref_model (
         .clk(clk_a), .rst_n(rst_n),
-        .cmd_a(port_a.cmd), .addr_a(port_a.addr),
+        .web_a(port_a.web), .addr_a(port_a.addr),
         .wdata_a(port_a.wdata), .wem_a(port_a.wem),
         .rdata_a_ref(port_a.rdata_ref),
-        .cmd_b(dut_cmd_b), .addr_b(dut_addr_b),
+        .web_b(port_b.web), .addr_b(dut_addr_b),
         .wdata_b(dut_wdata_b), .wem_b(dut_wem_b),
         .rdata_b_ref(port_b.rdata_ref)
     );
@@ -175,7 +175,13 @@ module tb_top;
     // ----------------------------------------------------------
     task automatic drive_port_a(port_tx_t t);
         @(posedge clk_a);
-        port_a.cmd   = t.cmd;
+        if (t.cmd == MEM_READ) begin
+            port_a.ceb = 1'b0; port_a.web = 1'b1;
+        end else if (t.cmd == MEM_WRITE) begin
+            port_a.ceb = 1'b0; port_a.web = 1'b0;
+        end else begin
+            port_a.ceb = 1'b1; port_a.web = 1'b1;
+        end
         port_a.addr  = t.addr & addr_mask;
         port_a.wdata = t.wdata & data_mask;
         port_a.wem   = (t.wem & wem_mask) | ~wem_mask;
@@ -183,7 +189,13 @@ module tb_top;
 
     task automatic drive_port_b(port_tx_t t);
         @(posedge clk_b);
-        port_b.cmd   = t.cmd;
+        if (t.cmd == MEM_READ) begin
+            port_b.ceb = 1'b0; port_b.web = 1'b1;
+        end else if (t.cmd == MEM_WRITE) begin
+            port_b.ceb = 1'b0; port_b.web = 1'b0;
+        end else begin
+            port_b.ceb = 1'b1; port_b.web = 1'b1;
+        end
         port_b.addr  = t.addr & addr_mask;
         port_b.wdata = t.wdata & data_mask;
         port_b.wem   = (t.wem & wem_mask) | ~wem_mask;

@@ -18,13 +18,13 @@ module sram_ref_model #(
     input  logic                       clk,
     input  logic                       rst_n,
 
-    input  logic [1:0]                 cmd_a,
+    input logic web_a,
     input  logic [ADDR_WIDTH-1:0]      addr_a,
     input  logic [DATA_WIDTH-1:0]      wdata_a,
     input  logic [DATA_WIDTH-1:0]      wem_a,
     output logic [DATA_WIDTH-1:0]      rdata_a_ref,
 
-    input  logic [1:0]                 cmd_b,
+    input logic web_b,
     input  logic [ADDR_WIDTH-1:0]      addr_b,
     input  logic [DATA_WIDTH-1:0]      wdata_b,
     input  logic [DATA_WIDTH-1:0]      wem_b,
@@ -43,7 +43,7 @@ module sram_ref_model #(
             rdata_b_ref <= '0;
         end else begin
             // Port A: always active
-            if (cmd_a == 2'b01) rdata_a_ref <= mem[addr_a];
+            if (web_a == 1'b1) rdata_a_ref <= mem[addr_a];
 
             // Port B:
             //   SP (mode=0): returns 0 (no Port B)
@@ -51,7 +51,7 @@ module sram_ref_model #(
             //   TDP/WEB (mode=2): fully active
             if (SRAM_MODE == 0)
                 rdata_b_ref <= '0;
-            else if (cmd_b == 2'b01)
+            else if (web_b == 1'b1)
                 rdata_b_ref <= mem[addr_b];
         end
     end
@@ -61,7 +61,7 @@ module sram_ref_model #(
     // ----------------------------------------------------------
     always_ff @(posedge clk) begin
         // Port A: always active for write
-        if (cmd_a == 2'b10) begin
+        if (web_a == 1'b0) begin
             for (int i = 0; i < DATA_WIDTH; i++) begin
                 if (wem_a[i] == 1'b0) mem[addr_a][i] = wdata_a[i];
             end
@@ -72,7 +72,7 @@ module sram_ref_model #(
         //   SDP (mode=1): read-only, no writes
         //   TDP/WEB (mode=2): fully active
         if (SRAM_MODE >= 2) begin
-            if (cmd_b == 2'b10) begin
+            if (web_b == 1'b0) begin
                 for (int i = 0; i < DATA_WIDTH; i++) begin
                     if (wem_b[i] == 1'b0) mem[addr_b][i] = wdata_b[i];
                 end

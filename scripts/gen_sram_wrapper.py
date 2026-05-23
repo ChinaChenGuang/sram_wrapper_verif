@@ -730,13 +730,13 @@ def cmd_instance(args):
     print(f"  // Include the generated file in your source list, then:")
     print(f"  {out_name} #(ADDR_WIDTH, DATA_WIDTH) u_dut (")
     print(f"      .clk(clk), .rst_n(rst_n),")
-    print(f"      .cmd_a(vif.cmd_a), .addr_a(vif.addr_a),")
-    print(f"      .wdata_a(vif.wdata_a), .wem_a(vif.wem_a),")
-    print(f"      .rdata_a(vif.rdata_a_ori),")
+    print(f"      .cmd_a(cmd_a), .addr_a(wr_if.addr),")
+    print(f"      .wdata_a(wr_if.wdata), .wem_a(wr_if.wem),")
+    print(f"      .rdata_a(rdata_a_ori),")
     if has_b:
-        print(f"      .cmd_b(vif.cmd_b), .addr_b(vif.addr_b),")
-        print(f"      .wdata_b(vif.wdata_b), .wem_b(vif.wem_b),")
-        print(f"      .rdata_b(vif.rdata_b_ori)")
+        print(f"      .cmd_b(cmd_b), .addr_b(rd_if.addr),")
+        print(f"      .wdata_b(rd_if.wdata), .wem_b(rd_if.wem),")
+        print(f"      .rdata_b(rdata_b_ori)")
     print(f"  );")
     print(f"")
     print(f"  make all DUT_SRCS=\"{out_path}\"")
@@ -788,11 +788,11 @@ def generate_connect(module: SramModule, port_map: Dict[str, SramPort],
         connections.append(f"    .{port_map['rst_n'].name} (rst_n)")
 
     port_a_signals = {
-        'cmd_a':   'vif.cmd_a',
-        'addr_a':  'vif.addr_a',
-        'wdata_a': 'vif.wdata_a',
-        'wem_a':   'vif.wem_a',
-        'rdata_a': f'vif.rdata_a{rdata_suffix}',
+        'cmd_a':   'cmd_a',
+        'addr_a':  'wr_if.addr',
+        'wdata_a': 'wr_if.wdata',
+        'wem_a':   'wr_if.wem',
+        'rdata_a': f'rdata_a{rdata_suffix}',
     }
     for std_name, tb_signal in port_a_signals.items():
         if std_name in port_map:
@@ -801,11 +801,11 @@ def generate_connect(module: SramModule, port_map: Dict[str, SramPort],
 
     if has_b:
         port_b_signals = {
-            'cmd_b':   'vif.cmd_b',
-            'addr_b':  'vif.addr_b',
-            'wdata_b': 'vif.wdata_b',
-            'wem_b':   'vif.wem_b',
-            'rdata_b': f'vif.rdata_b{rdata_suffix}',
+            'cmd_b':   'cmd_b',
+            'addr_b':  'rd_if.addr',
+            'wdata_b': 'rd_if.wdata',
+            'wem_b':   'rd_if.wem',
+            'rdata_b': f'rdata_b{rdata_suffix}',
         }
         for std_name, tb_signal in port_b_signals.items():
             if std_name in port_map:

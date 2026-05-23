@@ -10,7 +10,7 @@ class test_mem_b2b extends mem_base_test #(10, 32);
         phase.raise_objection(this);
         seq = mem_b2b_raw_seq #(10, 32)::type_id::create("seq");
         seq.num_tx = 200;
-        seq.wr_sqr = env.wr_agent.sqr;
+        // seq.wr_sqr = env.wr_agent.sqr;
         seq.start(env.wr_agent.sqr);
         phase.drop_objection(this);
     endtask

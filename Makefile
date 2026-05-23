@@ -29,24 +29,24 @@ TX_COUNT       ?= 100
 VCS_FLAGS = -full64 -sverilog -timescale=1ns/1ps \
             +vcs+lic+wait +define+VCS \
             +define+UVM_NO_DPI \
-            -debug_access+all -line64 -j 4 \
+            -debug_access+all -j 4 \
             -ntb_opts uvm-1.2 \
             +incdir+./verif_env/tb +incdir+./verif_env/uvc \
             +incdir+./verif_env/uvc/classes +incdir+./verif_env/tests \
             +incdir+./verif_env/tests/classes \
             +incdir+./$(GEN_DIR) \
-            -f $(GEN_DIR)/gen_sram_b2b.f \
             -l vcs_compile.log
+#           -f $(GEN_DIR)/gen_sram_b2b.f \
 
-VCS_SRCS = ./verif_env/tb/tb_top.sv \
-           ./verif_env/tb/clk_gen.sv \
-           ./verif_env/tb/mem_port_if.sv \
-           ./verif_env/tb/mem_port_checker.sv \
-           ./rtl/sram_ref_model.sv \
-           ./rtl/sram_cfg_pkg.sv \
-           ./rtl/sram_proto_adapter.sv \
+VCS_SRCS = ./rtl/sram_cfg_pkg.sv \
            ./verif_env/uvc/mem_uvc_pkg.sv \
-           ./verif_env/tests/mem_test_pkg.sv
+           ./verif_env/tests/mem_test_pkg.sv \
+           ./verif_env/tb/clk_gen.sv \
+           ./verif_env/tb/mem_if.sv \
+           ./verif_env/tb/mem_sva_checker.sv \
+           ./rtl/sram_ref_model.sv \
+           ./rtl/sram_proto_adapter.sv \
+           ./verif_env/tb/tb_top.sv
 
 # ================================================================
 # Build & Run
@@ -55,10 +55,18 @@ VCS_SRCS = ./verif_env/tb/tb_top.sv \
 .PHONY: build run
 
 build:
-	@echo "==> [VCS] Compiling..."
+	@echo "==> [VCS] Compiling (Env Only Mode)..."
 	mkdir -p $(WORK_DIR) $(GEN_DIR)
 	$(VCS_BIN) $(VCS_FLAGS) $(VCS_SRCS) \
 		+define+SIM_ALL \
+		-o $(WORK_DIR)/simv 2>&1 | tee $(WORK_DIR)/vcs_build.log
+	@echo "==> [VCS] Done: $(WORK_DIR)/simv"
+
+build_debug:
+	@echo "==> [VCS] Compiling (Debug Mode)..."
+	mkdir -p $(WORK_DIR) $(GEN_DIR)
+	$(VCS_BIN) $(VCS_FLAGS) $(VCS_SRCS) \
+		+define+SIM_ALL +define+ENV_DEBUG \
 		-o $(WORK_DIR)/simv 2>&1 | tee $(WORK_DIR)/vcs_build.log
 	@echo "==> [VCS] Done: $(WORK_DIR)/simv"
 
@@ -104,6 +112,27 @@ parse:
 		--output sram_instances.yaml \
 		--log $(GEN_DIR)/parse.log
 
+parse_mem:
+	python3 scripts/parse_memoris.py \
+		--dir ./mem \
+		--output sram_instances.yaml \
+		--log $(GEN_DIR)/parse_mem.log
+
+# ================================================================
+# Packaging
+# ================================================================
+
+.PHONY: pack
+
+pack:
+	@echo "==> Packaging project (excluding .git and build artifacts)..."
+	@DIR_NAME=$$(basename "$$PWD"); \
+	cd .. && tar -czvf "$$DIR_NAME.tar.gz" \
+		--exclude='.git' --exclude='vcs_work' --exclude='*.log' \
+		--exclude='dump.fst' --exclude='gen' --exclude='run_dir' \
+		"$$DIR_NAME/"
+	@echo "==> Package created at ../$$(basename "$$PWD").tar.gz"
+
 # ================================================================
 # Clean
 # ================================================================
@@ -111,12 +140,6 @@ parse:
 .PHONY: clean
 
 clean::
-	rm -rf $(WORK_DIR) csrc simv* *.key *.log
-
-# ================================================================
-# Include Verilator targets
-# ================================================================
-
--include Makefile.verilator
+	rm -rf $(WORK_DIR) csrc simv* *.key *.log $(GEN_DIR)
 
 .DEFAULT_GOAL := build

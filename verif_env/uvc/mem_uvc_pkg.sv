@@ -15,12 +15,19 @@ package mem_uvc_pkg;
     `include "uvm_macros.svh"
 
     // -------------------------------------------------------
-    // Port type
+    // Types
     // -------------------------------------------------------
+    typedef enum logic [1:0] {
+        MEM_NOP   = 2'b00,
+        MEM_READ  = 2'b01,
+        MEM_WRITE = 2'b10
+    } mem_cmd_e;
+
     typedef enum {
-        PORT_WRITE,
-        PORT_READ
-    } port_type_e;
+        SRAM_SP,
+        SRAM_SDP,
+        SRAM_TDP
+    } sram_type_e;
 
     // -------------------------------------------------------
     // Unified classes (write + read merged)

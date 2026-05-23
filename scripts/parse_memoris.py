@@ -413,7 +413,7 @@ def main():
     if instances:
         print(f"\n下一步:")
         print(f"  python3 scripts/gen_sram_b2b.py")
-        print(f"  make build-vcs \\")
+        print(f"  make build \\")
         print(f"    DUT_ORI={instances[0]['name']}_ori DUT_NEW={instances[0]['name']}_new")
         print(f"    ADDR_WIDTH={instances[0]['addr_width']} DATA_WIDTH={instances[0]['data_width']}")
 

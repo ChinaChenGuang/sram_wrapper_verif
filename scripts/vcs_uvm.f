@@ -70,11 +70,6 @@
 ./verif_env/tb/mem_if.sv
 ./verif_env/tb/mem_if_dualclk.sv
 // -----------------------------------------------------------
-// UVM Testbench Architecture Files
-// -----------------------------------------------------------
-// Pick ONE testbench top:
-./verif_env/tb/tb_top.sv
-// -----------------------------------------------------------
 // UVM Verification Components
 // -----------------------------------------------------------
 ./verif_env/uvc/mem_uvc_pkg.sv
@@ -82,3 +77,8 @@
 // UVM Test Sequences & Tests
 // -----------------------------------------------------------
 ./verif_env/tests/mem_test_pkg.sv
+// -----------------------------------------------------------
+// UVM Testbench Architecture Files
+// -----------------------------------------------------------
+// Pick ONE testbench top:
+./verif_env/tb/tb_top.sv

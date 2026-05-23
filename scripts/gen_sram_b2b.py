@@ -180,7 +180,7 @@ def parse_module_ports(filepath: Path, LOG: Logger):
     return ports, params
 
 
-def map_port_to_tb(port: dict, postfix: str, all_ports: list) -> str:
+def map_port_to_tb(port: dict, postfix: str, all_ports: list, inst_name: str) -> str:
     """Map a module port to tb_top signal.
     all_ports is used to detect 1P vs 2P mode.
     """
@@ -197,40 +197,40 @@ def map_port_to_tb(port: dict, postfix: str, all_ports: list) -> str:
         if name == "CLKR":  return "clk_b"
         if name == "RSTNW": return "rst_n"
         if name == "RSTNR": return "rst_n"
-        if name == "WEB":   return "port_a.web"
-        if name == "REB":   return "port_b.web"
-        if name == "BWEB":  return "port_a.wem"
-        if name == "AA":    return "port_a.addr"
-        if name == "AB":    return "port_b.addr"
-        if name == "D":     return "port_a.wdata"
-        if name == "Q":     return f"port_b.rdata{postfix}"
-        if name == "CEB":   return "port_a.ceb"
+        if name == "WEB":   return "cmd_a"  # Logic needs to handle bit mapping if needed
+        if name == "REB":   return "cmd_b"
+        if name == "BWEB":  return "wr_if.wem"
+        if name == "AA":    return "wr_if.addr"
+        if name == "AB":    return "rd_if.addr"
+        if name == "D":     return "wr_if.wdata"
+        if name == "Q":     return f"rdata_b{postfix}_{inst_name}"
+        if name == "CEB":   return "cmd_a"  # Simplified mapping
 
     # === 1P (Single Port) ===
     if not is_2p:
         if name == "CLK":   return "clk_a"
         if name == "rstn":  return "rst_n"
-        if name == "CEB":   return "port_a.ceb"
-        if name == "WEB":   return "port_a.web"
-        if name == "BWEB":  return "port_a.wem"
-        if name == "A":     return "port_a.addr"
-        if name == "D":     return "port_a.wdata"
-        if name == "Q":     return f"port_a.rdata{postfix}"
+        if name == "CEB":   return "cmd_a"
+        if name == "WEB":   return "cmd_a"
+        if name == "BWEB":  return "wr_if.wem"
+        if name == "A":     return "wr_if.addr"
+        if name == "D":     return "wr_if.wdata"
+        if name == "Q":     return f"rdata_a{postfix}_{inst_name}"
 
     # === Common (legacy + lowercase port names) ===
     name_map = {
         "clk": "clk_a", "clk_a": "clk_a", "clk_b": "clk_b",
         "rst_n": "rst_n", "rst": "rst_n", "reset_n": "rst_n",
-        "ceb": "port_a.ceb",
-        "web": "port_a.web",
-        "addr": "port_a.addr",
-        "wdata": "port_a.wdata",
-        "wem": "port_a.wem",
-        "cmd_a": "port_a.ceb", "cmd_b": "port_b.ceb",
-        "addr_a": "port_a.addr", "addr_b": "port_b.addr",
-        "wdata_a": "port_a.wdata", "wdata_b": "port_b.wdata",
-        "wem_a": "port_a.wem", "wem_b": "port_b.wem",
-        "rdata_a": f"port_a.rdata{postfix}", "rdata_b": f"port_b.rdata{postfix}",
+        "ceb": "cmd_a",
+        "web": "cmd_a",
+        "addr": "wr_if.addr",
+        "wdata": "wr_if.wdata",
+        "wem": "wr_if.wem",
+        "cmd_a": "cmd_a", "cmd_b": "cmd_b",
+        "addr_a": "wr_if.addr", "addr_b": "rd_if.addr",
+        "wdata_a": "wr_if.wdata", "wdata_b": "rd_if.wdata",
+        "wem_a": "wr_if.wem", "wem_b": "rd_if.wem",
+        "rdata_a": f"rdata_a{postfix}_{inst_name}", "rdata_b": f"rdata_b{postfix}_{inst_name}",
     }
     if name in name_map:
         return name_map[name]
@@ -459,8 +459,18 @@ def main():
             f"`endif",
             f"`ifdef SIM_ALL",
             "",
-            f"// Instance-specific data mask ({dw} bits)",
+            f"// Instance-specific data mask ({dw} bits) and localized wires",
             f"logic [{dw}-1:0] data_mask_{name} = '1;",
+            f"logic [{dw}-1:0] rdata_a_ori_{name}, rdata_b_ori_{name};",
+            f"logic [{dw}-1:0] rdata_a_new_{name}, rdata_b_new_{name};",
+            "",
+            f"`ifndef RDATA_DRIVEN",
+            f"    `define RDATA_DRIVEN",
+            f"    assign rdata_a_ori = rdata_a_ori_{name};",
+            f"    assign rdata_b_ori = rdata_b_ori_{name};",
+            f"    assign rdata_a_new = rdata_a_new_{name};",
+            f"    assign rdata_b_new = rdata_b_new_{name};",
+            f"`endif",
             ""]
 
         for side, top_mod, postfix in [("ori", ori_top, "_ori"), ("new", new_top, "_new")]:
@@ -487,15 +497,19 @@ def main():
             # Port list - map to tb signals
             pconnects = []
             for p in ports:
-                tb_signal = map_port_to_tb(p, postfix, ports)
+                tb_signal = map_port_to_tb(p, postfix, ports, name)
                 pconnects.append(f"    .{p['name']} ({tb_signal})")
             connect_lines.append(",\n".join(pconnects))
             connect_lines.append(f");\n")
 
         # Checker — uses instance-specific data_mask
         connect_lines.append(f"// ── Checker: {name} ──")
-        connect_lines.append(f"mem_port_checker #({dw}, 1, 1, \"{name.upper()}\") u_chk_{name} (")
-        connect_lines.append(f"    .vif       (port_a.monitor),")
+        connect_lines.append(f"mem_sva_checker #({dw}, 1, \"{name.upper()}\") u_chk_{name} (")
+        connect_lines.append(f"    .clk       (clk_a),")
+        connect_lines.append(f"    .rst_n     (rst_n),")
+        connect_lines.append(f"    .cmd       (cmd_a),")
+        connect_lines.append(f"    .rdata_ori (rdata_a_ori_{name}),")
+        connect_lines.append(f"    .rdata_new (rdata_a_new_{name}),")
         connect_lines.append(f"    .data_mask (data_mask_{name})")
         connect_lines.append(f");")
         connect_lines.append(f"`endif  // SIM_ALL / SIM_{name}")
@@ -546,7 +560,7 @@ def main():
     if enabled and ok > 0:
         e = enabled[0]
         LOG.write(f"\n下一步:")
-        LOG.write(f"  make build-vcs DUT_ORI={e['name']}_ori DUT_NEW={e['name']}_new \\")
+        LOG.write(f"  make build DUT_ORI={e['name']}_ori DUT_NEW={e['name']}_new \\\n")
         LOG.write(f"    ADDR_WIDTH={e.get('addr_width','auto')} DATA_WIDTH={e.get('data_width','auto')}")
 
     LOG.save()

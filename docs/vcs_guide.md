@@ -25,10 +25,10 @@ VCS 优势：
 
 ```bash
 # 编译 UVM 测试平台 (test_mem_sp 为默认测试)
-make build-vcs
+make build
 
 # 指定 DUT 模块
-make build-vcs DUT_ORI=dut_sram DUT_NEW=dut_sram_v2
+make build DUT_ORI=dut_sram DUT_NEW=dut_sram_v2
 ```
 
 ### 运行仿真

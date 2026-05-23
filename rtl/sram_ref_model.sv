@@ -18,18 +18,22 @@ module sram_ref_model #(
     input  logic                       clk,
     input  logic                       rst_n,
 
-    input logic web_a,
+    input  logic [1:0]                 cmd_a,
     input  logic [ADDR_WIDTH-1:0]      addr_a,
     input  logic [DATA_WIDTH-1:0]      wdata_a,
     input  logic [DATA_WIDTH-1:0]      wem_a,
     output logic [DATA_WIDTH-1:0]      rdata_a_ref,
 
-    input logic web_b,
+    input  logic [1:0]                 cmd_b,
     input  logic [ADDR_WIDTH-1:0]      addr_b,
     input  logic [DATA_WIDTH-1:0]      wdata_b,
     input  logic [DATA_WIDTH-1:0]      wem_b,
     output logic [DATA_WIDTH-1:0]      rdata_b_ref
 );
+
+    localparam MEM_NOP   = 2'b00;
+    localparam MEM_READ  = 2'b01;
+    localparam MEM_WRITE = 2'b10;
 
     localparam DEPTH = 1 << ADDR_WIDTH;
     logic [DATA_WIDTH-1:0] mem [0:DEPTH-1];
@@ -42,39 +46,37 @@ module sram_ref_model #(
             rdata_a_ref <= '0;
             rdata_b_ref <= '0;
         end else begin
-            // Port A: always active
-            if (web_a == 1'b1) rdata_a_ref <= mem[addr_a];
+            // Port A:
+            if (cmd_a == MEM_READ) rdata_a_ref <= mem[addr_a];
 
             // Port B:
             //   SP (mode=0): returns 0 (no Port B)
             //   SDP (mode=1): read-only Port B
-            //   TDP/WEB (mode=2): fully active
+            //   TDP (mode=2): fully active
             if (SRAM_MODE == 0)
                 rdata_b_ref <= '0;
-            else if (web_b == 1'b1)
+            else if (cmd_b == MEM_READ)
                 rdata_b_ref <= mem[addr_b];
         end
     end
 
     // ----------------------------------------------------------
-    // WRITE (matches DUT: wem masking, blocking = for Verilator)
+    // WRITE (matches DUT: wem masking)
     // ----------------------------------------------------------
     always_ff @(posedge clk) begin
-        // Port A: always active for write
-        if (web_a == 1'b0) begin
+        // Port A:
+        if (cmd_a == MEM_WRITE) begin
             for (int i = 0; i < DATA_WIDTH; i++) begin
-                if (wem_a[i] == 1'b0) mem[addr_a][i] = wdata_a[i];
+                if (wem_a[i] == 1'b0) mem[addr_a][i] <= wdata_a[i];
             end
         end
 
         // Port B:
-        //   SP (mode=0): no writes
-        //   SDP (mode=1): read-only, no writes
-        //   TDP/WEB (mode=2): fully active
+        //   TDP (mode=2): fully active for write
         if (SRAM_MODE >= 2) begin
-            if (web_b == 1'b0) begin
+            if (cmd_b == MEM_WRITE) begin
                 for (int i = 0; i < DATA_WIDTH; i++) begin
-                    if (wem_b[i] == 1'b0) mem[addr_b][i] = wdata_b[i];
+                    if (wem_b[i] == 1'b0) mem[addr_b][i] <= wdata_b[i];
                 end
             end
         end

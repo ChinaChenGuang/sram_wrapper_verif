@@ -12,6 +12,7 @@ package mem_test_pkg;
     import mem_uvc_pkg::*;
 
     `include "mem_base_seq.sv"
+    `include "mem_port_seq.sv"
     `include "mem_sp_seq.sv"
     `include "mem_sdp_seq.sv"
     `include "mem_rd_only_seq.sv"
@@ -26,6 +27,7 @@ endpackage : mem_test_pkg
 
 // Global scope concrete tests
 import uvm_pkg::*;
+import mem_uvc_pkg::*;
 import mem_test_pkg::*;
 
 `include "test_mem_sp.sv"

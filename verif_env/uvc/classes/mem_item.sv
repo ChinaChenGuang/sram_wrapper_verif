@@ -29,10 +29,10 @@ class mem_item #(int AW=10, int DW=32) extends uvm_sequence_item;
         this.rdata = rhs_.rdata;
     endfunction
 
-    function bit do_compare(uvm_object rhs, uvm_comparer c);
+    function bit do_compare(uvm_object rhs, uvm_comparer comparer);
         mem_item #(AW, DW) rhs_;
         if (!$cast(rhs_, rhs)) return 0;
-        return (super.do_compare(rhs, c) &&
+        return (super.do_compare(rhs, comparer) &&
                 ce    == rhs_.ce    &&
                 we    == rhs_.we    &&
                 addr  == rhs_.addr  &&
@@ -41,14 +41,14 @@ class mem_item #(int AW=10, int DW=32) extends uvm_sequence_item;
                 rdata == rhs_.rdata);
     endfunction
 
-    function void do_print(uvm_printer p);
-        super.do_print(p);
-        p.print_field("ce",    ce,    1,  UVM_BIN);
-        p.print_field("we",    we,    1,  UVM_BIN);
-        p.print_field("addr",  addr,  AW, UVM_HEX);
-        p.print_field("wdata", wdata, DW, UVM_HEX);
-        p.print_field("wem",   wem,   DW, UVM_HEX);
-        p.print_field("rdata", rdata, DW, UVM_HEX);
+    function void do_print(uvm_printer printer);
+        super.do_print(printer);
+        printer.print_field("ce",    ce,    1,  UVM_BIN);
+        printer.print_field("we",    we,    1,  UVM_BIN);
+        printer.print_field("addr",  addr,  AW, UVM_HEX);
+        printer.print_field("wdata", wdata, DW, UVM_HEX);
+        printer.print_field("wem",   wem,   DW, UVM_HEX);
+        printer.print_field("rdata", rdata, DW, UVM_HEX);
     endfunction
 
     function string convert2string();

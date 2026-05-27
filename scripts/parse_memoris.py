@@ -134,6 +134,8 @@ def main():
                         help="orig wrapper 目录 (如 ./memory_wrapper_orig)")
     parser.add_argument("--new", type=str, default=None,
                         help="new wrapper 目录 (如 ./memory_wrapper_new)")
+    parser.add_argument("--emu", type=str, default=None,
+                        help="emu wrapper 目录 (可选, 如 ./memory_wrapper_emu)")
     parser.add_argument("--dir", type=str, default=None,
                         help="单目录模式 (orig=new)")
     parser.add_argument("--output", type=str, default="",
@@ -145,12 +147,18 @@ def main():
     args = parser.parse_args()
 
     # ── 确定目录 ──
+    emu_dir = None
     if args.orig and args.new:
         orig_dir = Path(args.orig).resolve()
         new_dir  = Path(args.new).resolve()
+        if args.emu:
+            emu_dir = Path(args.emu).resolve()
     elif args.dir:
         orig_dir = Path(args.dir).resolve()
         new_dir  = orig_dir
+        # emu_dir = orig_dir if they want to use one dir for all, but let's keep it None unless specified via --emu, or we can just set it to orig_dir if they want to test identicals.
+        if args.emu:
+            emu_dir = Path(args.emu).resolve()
     else:
         parser.print_help()
         print("\n错误: 请指定 --orig + --new, 或 --dir")
@@ -166,9 +174,15 @@ def main():
     log(f"parse_memoris.py — {datetime.datetime.now()}")
     log(f"  orig → {orig_dir}  ({resolve_symlink(orig_dir)})")
     log(f"  new  → {new_dir}  ({resolve_symlink(new_dir)})")
+    if emu_dir:
+        log(f"  emu  → {emu_dir}  ({resolve_symlink(emu_dir)})")
     log()
 
-    for d, label in [(orig_dir, "orig"), (new_dir, "new")]:
+    dirs_to_check = [(orig_dir, "orig"), (new_dir, "new")]
+    if emu_dir:
+        dirs_to_check.append((emu_dir, "emu"))
+
+    for d, label in dirs_to_check:
         if not d.exists():
             log(f"错误: {label} 目录不存在: {d}")
             sys.exit(1)
@@ -179,15 +193,19 @@ def main():
     # ── 扫描 wrapper 文件 ──
     all_orig_files = find_wrapper_files(orig_dir)
     all_new_files  = find_wrapper_files(new_dir)
+    all_emu_files  = find_wrapper_files(emu_dir) if emu_dir else []
 
     # 只解析顶层 _mem_wrap.v（非 _low_ / _sub_），子模块不需要解析参数
     orig_top_files = [f for f in all_orig_files
                       if "_low_" not in f.stem and not f.stem.startswith("sub_") and "_sub_" not in f.stem]
     new_top_files  = [f for f in all_new_files
                       if "_low_" not in f.stem and not f.stem.startswith("sub_") and "_sub_" not in f.stem]
+    emu_top_files  = [f for f in all_emu_files
+                      if "_low_" not in f.stem and not f.stem.startswith("sub_") and "_sub_" not in f.stem]
 
     log(f"\n找到 {len(all_orig_files)} 个 orig 文件 ({len(orig_top_files)} 个顶层), "
-        f"{len(all_new_files)} 个 new 文件 ({len(new_top_files)} 个顶层)")
+        f"{len(all_new_files)} 个 new 文件 ({len(new_top_files)} 个顶层), "
+        f"{len(all_emu_files)} 个 emu 文件 ({len(emu_top_files)} 个顶层)")
 
     if not orig_top_files and not new_top_files:
         log("未找到任何顶层 *_mem_wrap.v 文件（不含 _low_/_sub_）")
@@ -291,6 +309,41 @@ def main():
         orig_extra = discover_extra_files(orig_f.parent, orig_f.name)
         new_extra  = discover_extra_files(new_f.parent if new_f else new_dir, new_f.name if new_f else "")
 
+        # Find emu file
+        emu_f = None
+        emu_extra = []
+        if emu_dir:
+            emu_f = emu_dir / orig_f.name if (emu_dir / orig_f.name).exists() else None
+            if not emu_f:
+                for ef in all_emu_files:
+                    if ef.name == orig_f.name:
+                        emu_f = ef
+                        break
+            emu_extra = discover_extra_files(emu_f.parent if emu_f else emu_dir, emu_f.name if emu_f else "")
+        else:
+            # Auto-discover emulation models from new side
+            has_syn = False
+            for nx in new_extra:
+                nx_p = Path(nx)
+                if nx_p.suffix == '.v':
+                    syn_p = nx_p.with_name(nx_p.stem + '_syn.v')
+                    if syn_p.exists():
+                        emu_extra.append(str(syn_p))
+                        has_syn = True
+                    else:
+                        emu_extra.append(nx)
+                elif nx_p.suffix == '.sv':
+                    syn_p = nx_p.with_name(nx_p.stem + '_syn.sv')
+                    if syn_p.exists():
+                        emu_extra.append(str(syn_p))
+                        has_syn = True
+                    else:
+                        emu_extra.append(nx)
+                else:
+                    emu_extra.append(nx)
+            if has_syn:
+                emu_f = new_f
+
         inst = {
             "name": orig_f.stem,
             "module_name": mod,
@@ -299,8 +352,10 @@ def main():
             "num_word": params.get("num_word", "?"),
             "orig_path": str(orig_f),
             "new_path": str(new_f) if new_f else str(new_dir / orig_f.name),
+            "emu_path": str(emu_f) if emu_f else (str(emu_dir / orig_f.name) if emu_dir else ""),
             "orig_extra": orig_extra,
             "new_extra": new_extra,
+            "emu_extra": emu_extra,
         }
         results.append(inst)
     instances = results  # replace tuples with dicts
@@ -362,6 +417,14 @@ def main():
         yaml_lines.append(f"    parse_from: {o_rel}")
         yaml_lines.append(f"    orig_path:  {o_rel}")
         yaml_lines.append(f"    new_path:   {n_rel}")
+        if inst.get("emu_path"):
+            try:
+                ep = Path(inst["emu_path"])
+                e_rel = ep.relative_to(Path.cwd())
+            except:
+                e_rel = inst["emu_path"]
+            yaml_lines.append(f"    emu_path:   {e_rel}")
+        
         # Auto-discovered extra files (relative to CWD)
         cwd = Path.cwd()
         if inst.get("orig_extra"):
@@ -375,6 +438,14 @@ def main():
         if inst.get("new_extra"):
             yaml_lines.append(f"    new_extra:")
             for x in inst["new_extra"]:
+                try:
+                    x_rel = Path(x).relative_to(cwd)
+                except ValueError:
+                    x_rel = Path(x)
+                yaml_lines.append(f"      - {x_rel}")
+        if inst.get("emu_extra"):
+            yaml_lines.append(f"    emu_extra:")
+            for x in inst["emu_extra"]:
                 try:
                     x_rel = Path(x).relative_to(cwd)
                 except ValueError:

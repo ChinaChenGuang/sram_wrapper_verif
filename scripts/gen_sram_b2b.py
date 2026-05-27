@@ -288,7 +288,8 @@ def main():
     global_cfg = cfg.get("global", {})
     out_dir = PROJ_ROOT / global_cfg.get("output_dir", "gen")
     ori_sfx = global_cfg.get("ori_suffix", "_ori")
-    new_sfx = global_cfg.get("new_suffix", "_new")
+    new_sfx = global_cfg.get("new_suffix", "_bm")
+    emu_sfx = global_cfg.get("emu_suffix", "_em")
 
     if args.instance:
         instances = [i for i in instances if args.instance in i["name"]]
@@ -337,7 +338,11 @@ def main():
 
         # ── 收集文件 ──
         inst_data = {}
-        for side, sfx in [("orig", ori_sfx), ("new", new_sfx)]:
+        sides_to_process = [("orig", ori_sfx), ("new", new_sfx)]
+        if inst.get("emu_path"):
+            sides_to_process.append(("emu", emu_sfx))
+
+        for side, sfx in sides_to_process:
             files = []
 
             # 1) Primary wrapper
@@ -412,7 +417,7 @@ def main():
             continue
 
         # ── 生成重命名文件 ──
-        for side, sfx in [("orig", ori_sfx), ("new", new_sfx)]:
+        for side, sfx in sides_to_process:
             file_paths, rename_map = inst_data[side]
             for src_path in file_paths:
                 stem = src_path.stem
@@ -436,6 +441,7 @@ def main():
         # ── 生成 connect snippet (parse real wrapper ports) ──
         ori_top = f"{mod_name}{ori_sfx}"
         new_top = f"{mod_name}{new_sfx}"
+        emu_top = f"{mod_name}{emu_sfx}" if "emu" in inst_data else ""
 
         wrapper_file = Path(inst.get("orig_path", f"rtl/orig/{name}.v"))
         if not wrapper_file.exists():
@@ -463,6 +469,7 @@ def main():
             f"logic [{dw}-1:0] data_mask_{name} = '1;",
             f"logic [{dw}-1:0] rdata_a_ori_{name}, rdata_b_ori_{name};",
             f"logic [{dw}-1:0] rdata_a_new_{name}, rdata_b_new_{name};",
+            f"logic [{dw}-1:0] rdata_a_emu_{name} = '0, rdata_b_emu_{name} = '0;",
             "",
             f"`ifndef RDATA_DRIVEN",
             f"    `define RDATA_DRIVEN",
@@ -473,8 +480,12 @@ def main():
             f"`endif",
             ""]
 
-        for side, top_mod, postfix in [("ori", ori_top, "_ori"), ("new", new_top, "_new")]:
-            tag = "DUT ORI" if side == "ori" else "DUT NEW"
+        instances_to_connect = [("ori", ori_top, "_ori"), ("new", new_top, "_new")]
+        if "emu" in inst_data:
+            instances_to_connect.append(("emu", emu_top, "_emu"))
+
+        for side, top_mod, postfix in instances_to_connect:
+            tag = f"DUT {side.upper()}"
             connect_lines.append(f"  // {tag}: {top_mod}")
             # Parameter list — use known values, fallback to default from RTL
             if params:
@@ -503,6 +514,7 @@ def main():
             connect_lines.append(f");\n")
 
         # Checker — uses instance-specific data_mask
+        has_emu = "1'b1" if "emu" in inst_data else "1'b0"
         connect_lines.append(f"// ── Checker: {name} ──")
         connect_lines.append(f"mem_sva_checker #({dw}, 1, \"{name.upper()}\") u_chk_{name} (")
         connect_lines.append(f"    .clk       (clk_a),")
@@ -510,6 +522,8 @@ def main():
         connect_lines.append(f"    .cmd       (cmd_a),")
         connect_lines.append(f"    .rdata_ori (rdata_a_ori_{name}),")
         connect_lines.append(f"    .rdata_new (rdata_a_new_{name}),")
+        connect_lines.append(f"    .rdata_emu (rdata_a_emu_{name}),")
+        connect_lines.append(f"    .has_emu   ({has_emu}),")
         connect_lines.append(f"    .data_mask (data_mask_{name})")
         connect_lines.append(f");")
         connect_lines.append(f"`endif  // SIM_ALL / SIM_{name}")

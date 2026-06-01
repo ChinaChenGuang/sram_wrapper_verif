@@ -14,6 +14,8 @@
 #   make -f Makefile.verilator build
 # ================================================================
 
+SHELL          = /bin/csh
+
 VCS_BIN        ?= vcs
 WORK_DIR       ?= vcs_work
 GEN_DIR        ?= gen
@@ -59,7 +61,7 @@ build:
 	mkdir -p $(WORK_DIR) $(GEN_DIR)
 	$(VCS_BIN) $(VCS_FLAGS) $(VCS_SRCS) \
 		+define+SIM_ALL \
-		-o $(WORK_DIR)/simv 2>&1 | tee $(WORK_DIR)/vcs_build.log
+		-o $(WORK_DIR)/simv |& tee $(WORK_DIR)/vcs_build.log
 	@echo "==> [VCS] Done: $(WORK_DIR)/simv"
 
 build_debug:
@@ -67,7 +69,7 @@ build_debug:
 	mkdir -p $(WORK_DIR) $(GEN_DIR)
 	$(VCS_BIN) $(VCS_FLAGS) $(VCS_SRCS) \
 		+define+SIM_ALL +define+ENV_DEBUG \
-		-o $(WORK_DIR)/simv 2>&1 | tee $(WORK_DIR)/vcs_build.log
+		-o $(WORK_DIR)/simv |& tee $(WORK_DIR)/vcs_build.log
 	@echo "==> [VCS] Done: $(WORK_DIR)/simv"
 
 run:
@@ -76,7 +78,7 @@ run:
 		+UVM_TESTNAME=$(UVM_TEST) \
 		+UVM_VERBOSITY=$(UVM_VERBOSITY) \
 		+TX_COUNT=$(TX_COUNT) \
-		-l vcs_simulation.log 2>&1 | tee vcs_run.log
+		-l vcs_simulation.log |& tee vcs_run.log
 
 # ================================================================
 # Quick tests
@@ -126,12 +128,13 @@ parse_mem:
 
 pack:
 	@echo "==> Packaging project (excluding .git and build artifacts)..."
-	@DIR_NAME=$$(basename "$$PWD"); \
+	@set DIR_NAME=`basename "$$PWD"`; \
 	cd .. && tar -czvf "$$DIR_NAME.tar.gz" \
 		--exclude='.git' --exclude='vcs_work' --exclude='*.log' \
 		--exclude='dump.fst' --exclude='gen' --exclude='run_dir' \
 		"$$DIR_NAME/"
-	@echo "==> Package created at ../$$(basename "$$PWD").tar.gz"
+	@set DIR_NAME=`basename "$$PWD"`; \
+	echo "==> Package created at ../$$DIR_NAME.tar.gz"
 
 # ================================================================
 # Clean

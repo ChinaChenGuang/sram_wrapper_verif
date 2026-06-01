@@ -10,4 +10,31 @@ class mem_base_test #(int AW=10, int DW=32, int MAX_AW=16, int MAX_DW=256) exten
         super.build_phase(phase);
         env = mem_env #(AW, DW, MAX_AW, MAX_DW)::type_id::create("env", this);
     endfunction
+
+    function void report_phase(uvm_phase phase);
+        uvm_report_server server;
+        int err_num;
+        super.report_phase(phase);
+        
+        server = uvm_report_server::get_server();
+        err_num = server.get_severity_count(UVM_ERROR) + server.get_severity_count(UVM_FATAL);
+        
+        if (err_num == 0) begin
+            $display("\n=======================================================");
+            $display("    ____   ___    ____  ____ ");
+            $display("   |  _ \\ / _ \\  / ___|/ ___|");
+            $display("   | |_) | |_| |  \\___ \\\\___ \\ ");
+            $display("   |  __/|  _  |   ___) |___) |");
+            $display("   |_|   |_| |_|  |____/|____/ ");
+            $display("=======================================================\n");
+        end else begin
+            $display("\n=======================================================");
+            $display("    _____  _    ___ _     ");
+            $display("   |  ___|/ \\  |_ _| |    ");
+            $display("   | |_  / _ \\  | || |    ");
+            $display("   |  _|/ ___ \\ | || |___ ");
+            $display("   |_| /_/   \\_\\___|_____|");
+            $display("=======================================================\n");
+        end
+    endfunction
 endclass

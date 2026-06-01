@@ -19,4 +19,9 @@ class mem_env #(int AW=10, int DW=32, int MAX_AW=16, int MAX_DW=256) extends uvm
         rd_agent = mem_agent #(AW, DW, MAX_AW, MAX_DW)::type_id::create("rd_agent", this);
         cfg_depth = 1 << AW;
     endfunction
+
+    task run_phase(uvm_phase phase);
+        super.run_phase(phase);
+        phase.get_objection().set_drain_time(this, 50ns);
+    endtask
 endclass

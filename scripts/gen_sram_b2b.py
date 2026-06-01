@@ -197,21 +197,20 @@ def map_port_to_tb(port: dict, postfix: str, all_ports: list, inst_name: str) ->
         if name == "CLKR":  return "clk_b"
         if name == "RSTNW": return "rst_n"
         if name == "RSTNR": return "rst_n"
-        if name == "WEB":   return "cmd_a"  # Logic needs to handle bit mapping if needed
-        if name == "REB":   return "cmd_b"
-        if name == "BWEB":  return "wr_if.wem"
+        if name == "WEB":   return "wr_if.we"
+        if name == "REB":   return "rd_if.ce"
+        if name == "CEB":   return "wr_if.ce"
         if name == "AA":    return "wr_if.addr"
         if name == "AB":    return "rd_if.addr"
         if name == "D":     return "wr_if.wdata"
         if name == "Q":     return f"rdata_b{postfix}_{inst_name}"
-        if name == "CEB":   return "cmd_a"  # Simplified mapping
 
     # === 1P (Single Port) ===
     if not is_2p:
         if name == "CLK":   return "clk_a"
         if name == "rstn":  return "rst_n"
-        if name == "CEB":   return "cmd_a"
-        if name == "WEB":   return "cmd_a"
+        if name == "CEB":   return "wr_if.ce"
+        if name == "WEB":   return "wr_if.we"
         if name == "BWEB":  return "wr_if.wem"
         if name == "A":     return "wr_if.addr"
         if name == "D":     return "wr_if.wdata"
@@ -221,8 +220,8 @@ def map_port_to_tb(port: dict, postfix: str, all_ports: list, inst_name: str) ->
     name_map = {
         "clk": "clk_a", "clk_a": "clk_a", "clk_b": "clk_b",
         "rst_n": "rst_n", "rst": "rst_n", "reset_n": "rst_n",
-        "ceb": "cmd_a",
-        "web": "cmd_a",
+        "ceb": "wr_if.ce",
+        "web": "wr_if.we",
         "addr": "wr_if.addr",
         "wdata": "wr_if.wdata",
         "wem": "wr_if.wem",

@@ -23,6 +23,7 @@ GEN_DIR        ?= gen
 UVM_TEST       ?= test_mem_fill_verify
 UVM_VERBOSITY  ?= UVM_MEDIUM
 TX_COUNT       ?= 100
+SIM_DEFINE     ?= +define+SIM_ALL
 
 # ================================================================
 # VCS Sources (built-in UVM 1.2 via -ntb_opts)
@@ -60,7 +61,7 @@ build:
 	@echo "==> [VCS] Compiling (Env Only Mode)..."
 	mkdir -p $(WORK_DIR) $(GEN_DIR)
 	$(VCS_BIN) $(VCS_FLAGS) $(VCS_SRCS) \
-		+define+SIM_ALL \
+		$(SIM_DEFINE) \
 		-o $(WORK_DIR)/simv |& tee $(WORK_DIR)/vcs_build.log
 	@echo "==> [VCS] Done: $(WORK_DIR)/simv"
 
@@ -68,7 +69,7 @@ build_debug:
 	@echo "==> [VCS] Compiling (Debug Mode)..."
 	mkdir -p $(WORK_DIR) $(GEN_DIR)
 	$(VCS_BIN) $(VCS_FLAGS) $(VCS_SRCS) \
-		+define+SIM_ALL +define+ENV_DEBUG \
+		$(SIM_DEFINE) +define+ENV_DEBUG \
 		-o $(WORK_DIR)/simv |& tee $(WORK_DIR)/vcs_build.log
 	@echo "==> [VCS] Done: $(WORK_DIR)/simv"
 

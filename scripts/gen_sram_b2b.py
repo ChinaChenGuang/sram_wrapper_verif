@@ -242,11 +242,19 @@ def map_port_to_tb(port: dict, postfix: str, all_ports: list, inst_name: str) ->
             return "40'h7738"
     ecc_outputs = {"ecc_encoder_parity_out", "ecc_decoder_parity_out",
                    "ecc_error_type", "latent_err", "mission_err"}
-    ecc_inputs  = {"ecc_encoder_bypass", "ecc_encoder_parity_in",
-                   "ecc_decoder_bypass", "fault_injection_enable", "fault_injection_value"}
     if name in ecc_outputs:
         return "/* */"
-    if name in ecc_inputs:
+    
+    # Specific ECC inputs tying rules
+    if name == "ecc_encoder_bypass":
+        return "1'b1"
+    if name == "ecc_encoder_parity_in":
+        return "1'b0"
+    if name == "ecc_decoder_bypass":
+        return "1'b1"
+    if name == "fault_injection_enable":
+        return "1'b0"
+    if name == "fault_injection_value":
         return "1'b0"
 
     # === Default ===

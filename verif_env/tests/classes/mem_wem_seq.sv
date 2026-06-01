@@ -11,9 +11,11 @@ class mem_wem_walking_seq #(int AW=10, int DW=32) extends mem_base_seq #(AW, DW)
         for (int i = 0; i < num_tx; i++) begin
             item = mem_item #(AW, DW)::type_id::create("item");
             start_item(item);
-            if (!item.randomize()) `uvm_error("SEQ", "RND FAIL")
-            
-            item.wem = ~(1 << (i % DW));
+            if (!item.randomize() with {
+                ce  == 1'b0;
+                we  == 1'b0;
+                wem == ~(1 << (i % DW));
+            }) `uvm_error("SEQ", "RND FAIL")
             finish_item(item);
         end
     endtask

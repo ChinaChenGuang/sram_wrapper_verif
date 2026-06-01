@@ -236,7 +236,10 @@ def map_port_to_tb(port: dict, postfix: str, all_ports: list, inst_name: str) ->
 
     # === ECC / config ===
     if name == "mem_cfg":
-        return "10'b0"
+        if postfix == "_ori":
+            return "18'b11_0011_0_0011"
+        else:
+            return "40'h7738"
     ecc_outputs = {"ecc_encoder_parity_out", "ecc_decoder_parity_out",
                    "ecc_error_type", "latent_err", "mission_err"}
     ecc_inputs  = {"ecc_encoder_bypass", "ecc_encoder_parity_in",

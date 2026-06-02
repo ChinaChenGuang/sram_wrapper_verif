@@ -300,7 +300,7 @@ def main():
         prefix = stem.removesuffix("_mem_wrap") if stem.endswith("_mem_wrap") else stem
         low_glob = f"{prefix}_low_mem_wrap.*"
 
-        def discover_extra_files(base_dir, exclude_name, mod_name, custom_lib_dir=None):
+        def discover_extra_files(base_dir, exclude_name, mod_name, custom_lib_dir=None, find_syn=False):
             """优先 filelist，否则只收集 {prefix}_low_mem_wrap.* 和 base libs """
             fl = find_filelist(base_dir)
             if fl:
@@ -320,7 +320,11 @@ def main():
             
             for sd in search_dirs:
                 for ext in ["v", "sv"]:
-                    for fn in [f"{prefix}.{ext}", f"{mod_name}.{ext}"]:
+                    names_to_check = [f"{prefix}.{ext}", f"{mod_name}.{ext}"]
+                    if find_syn:
+                        names_to_check = [f"{prefix}_syn.{ext}", f"{mod_name}_syn.{ext}"]
+                    
+                    for fn in names_to_check:
                         # 直接检查当前目录
                         p1 = sd / fn
                         if p1.exists() and str(p1) not in extras and p1.name != exclude_name:
@@ -356,26 +360,21 @@ def main():
         else:
             # Auto-discover emulation models from new side
             has_syn = False
+            
+            # 1. 继承 new_extra 里的 wrapper 文件
             for nx in new_extra:
                 nx_p = Path(nx)
-                if nx_p.suffix == '.v':
-                    syn_p = nx_p.with_name(nx_p.stem + '_syn.v')
-                    if syn_p.exists():
-                        emu_extra.append(str(syn_p))
-                        has_syn = True
-                        log(f"      [Syn Found] {syn_p}", echo=False)
-                    else:
-                        emu_extra.append(nx)
-                elif nx_p.suffix == '.sv':
-                    syn_p = nx_p.with_name(nx_p.stem + '_syn.sv')
-                    if syn_p.exists():
-                        emu_extra.append(str(syn_p))
-                        has_syn = True
-                        log(f"      [Syn Found] {syn_p}", echo=False)
-                    else:
-                        emu_extra.append(nx)
-                else:
+                if "low_mem_wrap" in nx_p.name:
                     emu_extra.append(nx)
+            
+            # 2. 显式查找 _syn 库文件
+            emu_libs = discover_extra_files(new_f.parent if new_f else new_dir, new_f.name if new_f else "", mod, user_lib_dir, find_syn=True)
+            for lib in emu_libs:
+                lib_p = Path(lib)
+                if "low_mem_wrap" not in lib_p.name and str(lib_p) not in emu_extra:
+                    emu_extra.append(str(lib_p))
+                    has_syn = True
+                    log(f"      [Syn Found] {lib_p}", echo=False)
             if has_syn:
                 emu_f = new_f
             else:

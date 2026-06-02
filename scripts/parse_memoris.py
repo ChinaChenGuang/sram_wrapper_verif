@@ -354,33 +354,29 @@ def main():
                             except: pass
                     
                     if wrapper_content:
-                        # 预先提取 wrapper 中所有的单词作为 O(1) 查找表，避免在循环中疯狂编译正则导致卡死
+                        # 预先提取 wrapper 中所有的单词作为 O(1) 查找表
                         wrapper_words = set(re.findall(r'[A-Za-z_]\w*', wrapper_content))
                         
-                        # 使用缓存的 rglob 列表，避免重复扫盘
-                        sd_path_str = str(sd)
-                        if sd_path_str not in discover_extra_files.rglob_cache:
-                            all_v_sv = []
-                            for ext in ["v", "sv"]:
-                                all_v_sv.extend(list(sd.rglob(f"*.{ext}")))
-                            discover_extra_files.rglob_cache[sd_path_str] = all_v_sv
+                        # 过滤掉太短的单词或常见的 verilog 关键字，减少无效的 stat 探测
+                        keywords = {"module", "endmodule", "input", "output", "inout", "wire", "reg", "logic", "assign", "always", "parameter", "localparam", "if", "else", "generate"}
+                        candidates = [w for w in wrapper_words if len(w) > 3 and w not in keywords]
+                        
+                        # 直接路径探测 (Direct Path Guessing) - 彻底避免在巨大的网络盘(NFS)上执行 rglob 导致卡死
+                        for w in candidates:
+                            # 根据 find_syn 决定要找的后缀
+                            suffixes = [f"_syn.v", f"_syn.sv"] if find_syn else [".v", ".sv"]
                             
-                        for lp in discover_extra_files.rglob_cache[sd_path_str]:
-                            stem = lp.stem
-                            # 假设库文件可能是 mem_lib.v 或 mem_lib_syn.v
-                            base_stem = stem[:-4] if stem.endswith("_syn") else stem
+                            # 可能的子目录形式: 当前目录(""), 模块名(w), 模块名+V(w+"V") <- 适配 KY100 命名规范
+                            subdirs = ["", w, f"{w}V", f"{w}v"]
                             
-                            # 直接用 O(1) 的哈希表查找替换 O(N) 的正则搜索
-                            if base_stem and base_stem in wrapper_words:
-                                    is_syn_file = stem.endswith("_syn")
-                                    if find_syn and is_syn_file:
-                                        if str(lp) not in extras:
-                                            extras.append(str(lp))
-                                            log(f"      [Smart Lib Found (Syn)] {lp}", echo=False)
-                                    elif not find_syn and not is_syn_file:
-                                        if str(lp) not in extras:
-                                            extras.append(str(lp))
-                                            log(f"      [Smart Lib Found] {lp}", echo=False)
+                            for sdir in subdirs:
+                                for sfx in suffixes:
+                                    # 拼装探测路径
+                                    p = (sd / sdir / f"{w}{sfx}") if sdir else (sd / f"{w}{sfx}")
+                                    if p.exists() and str(p) not in extras:
+                                        extras.append(str(p))
+                                        tag = "Syn" if find_syn else "Normal"
+                                        log(f"      [Smart Lib Found ({tag})] {p}", echo=False)
             
             return extras
 

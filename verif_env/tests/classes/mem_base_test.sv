@@ -7,12 +7,14 @@ class mem_base_test #(int AW=10, int DW=32, int MAX_AW=16, int MAX_DW=256) exten
     mem_env #(AW, DW, MAX_AW, MAX_DW) env;
     function new(string n, uvm_component p); super.new(n, p); endfunction
     function void build_phase(uvm_phase phase);
-        uvm_phase run_ph;
         super.build_phase(phase);
         env = mem_env #(AW, DW, MAX_AW, MAX_DW)::type_id::create("env", this);
-        run_ph = uvm_run_phase::get();
-        run_ph.get_objection().set_drain_time(this, 50ns);
     endfunction
+
+    task run_phase(uvm_phase phase);
+        super.run_phase(phase);
+        phase.get_objection().set_drain_time(this, 50ns);
+    endtask
 
     function void report_phase(uvm_phase phase);
         uvm_report_server server;

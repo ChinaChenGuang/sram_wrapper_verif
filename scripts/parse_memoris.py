@@ -321,9 +321,14 @@ def main():
             for sd in search_dirs:
                 for ext in ["v", "sv"]:
                     for fn in [f"{prefix}.{ext}", f"{mod_name}.{ext}"]:
+                        # 直接检查当前目录
                         p = sd / fn
                         if p.exists() and str(p) not in extras and p.name != exclude_name:
                             extras.append(str(p))
+                        # 递归检查子目录 (例如 lib/{MEM_NAME}/{MEM_NAME}.v)
+                        for rp in sd.rglob(fn):
+                            if rp.is_file() and str(rp) not in extras and rp.name != exclude_name:
+                                extras.append(str(rp))
             
             return extras
 

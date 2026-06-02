@@ -340,6 +340,35 @@ def main():
                         if p3.exists() and str(p3) not in extras and p3.name != exclude_name:
                             extras.append(str(p3))
                             log(f"      [Lib Found] {p3}", echo=False)
+
+                # Smart fallback: 如果传了专用的 lib 目录，尝试通过读取 wrapper 内容来自动匹配底层例化名
+                if sd != base_dir:
+                    wrapper_content = ""
+                    for x in extras:
+                        if "low_mem_wrap" in x:
+                            try:
+                                wrapper_content += Path(x).read_text(errors='ignore')
+                            except: pass
+                    
+                    if wrapper_content:
+                        for ext in ["v", "sv"]:
+                            for lp in sd.rglob(f"*.{ext}"):
+                                stem = lp.stem
+                                # 假设库文件可能是 mem_lib.v 或 mem_lib_syn.v
+                                base_stem = stem[:-4] if stem.endswith("_syn") else stem
+                                
+                                if base_stem and len(base_stem) > 2 and base_stem in wrapper_content:
+                                    # 确认是作为一个独立的单词出现 (大概率是模块例化)
+                                    if re.search(r'\b' + re.escape(base_stem) + r'\b', wrapper_content):
+                                        is_syn_file = stem.endswith("_syn")
+                                        if find_syn and is_syn_file:
+                                            if str(lp) not in extras:
+                                                extras.append(str(lp))
+                                                log(f"      [Smart Lib Found (Syn)] {lp}", echo=False)
+                                        elif not find_syn and not is_syn_file:
+                                            if str(lp) not in extras:
+                                                extras.append(str(lp))
+                                                log(f"      [Smart Lib Found] {lp}", echo=False)
             
             return extras
 

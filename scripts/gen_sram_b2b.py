@@ -409,7 +409,13 @@ def main():
                 fail += 1
                 continue
 
-            rename_map = {m: f"{m}{sfx}" for m in all_mods}
+            rename_map = {}
+            for m in all_mods:
+                is_syn_lib = any(f.name == f"{m}_syn.v" or f.name == f"{m}_syn.sv" for f in file_paths)
+                if side == "emu" and is_syn_lib:
+                    rename_map[m] = f"{m}_syn"
+                else:
+                    rename_map[m] = f"{m}{sfx}"
             LOG.write(f"  [{side}] {len(file_paths)} files, {len(rename_map)} modules")
             for k, v in sorted(rename_map.items()):
                 if k != v:

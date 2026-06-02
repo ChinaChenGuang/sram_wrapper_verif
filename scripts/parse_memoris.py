@@ -294,8 +294,8 @@ def main():
         prefix = stem.removesuffix("_mem_wrap") if stem.endswith("_mem_wrap") else stem
         low_glob = f"{prefix}_low_mem_wrap.*"
 
-        def discover_extra_files(base_dir, exclude_name):
-            """优先 filelist，否则只收集 {prefix}_low_mem_wrap.* """
+        def discover_extra_files(base_dir, exclude_name, mod_name):
+            """优先 filelist，否则只收集 {prefix}_low_mem_wrap.* 和 base libs """
             fl = find_filelist(base_dir)
             if fl:
                 return parse_filelist(fl)
@@ -304,10 +304,23 @@ def main():
                 pattern = f"{prefix}_low_mem_wrap.{ext}"
                 for vf in sorted(base_dir.glob(pattern)):
                     extras.append(str(vf))
+            
+            # Discover base memory macro files
+            search_dirs = [base_dir]
+            if (base_dir / "lib").exists():
+                search_dirs.append(base_dir / "lib")
+            
+            for sd in search_dirs:
+                for ext in ["v", "sv"]:
+                    for fn in [f"{prefix}.{ext}", f"{mod_name}.{ext}"]:
+                        p = sd / fn
+                        if p.exists() and str(p) not in extras and p.name != exclude_name:
+                            extras.append(str(p))
+            
             return extras
 
-        orig_extra = discover_extra_files(orig_f.parent, orig_f.name)
-        new_extra  = discover_extra_files(new_f.parent if new_f else new_dir, new_f.name if new_f else "")
+        orig_extra = discover_extra_files(orig_f.parent, orig_f.name, mod)
+        new_extra  = discover_extra_files(new_f.parent if new_f else new_dir, new_f.name if new_f else "", mod)
 
         # Find emu file
         emu_f = None
@@ -319,7 +332,7 @@ def main():
                     if ef.name == orig_f.name:
                         emu_f = ef
                         break
-            emu_extra = discover_extra_files(emu_f.parent if emu_f else emu_dir, emu_f.name if emu_f else "")
+            emu_extra = discover_extra_files(emu_f.parent if emu_f else emu_dir, emu_f.name if emu_f else "", mod)
         else:
             # Auto-discover emulation models from new side
             has_syn = False

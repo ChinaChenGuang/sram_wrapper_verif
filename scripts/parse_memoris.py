@@ -322,13 +322,20 @@ def main():
                 for ext in ["v", "sv"]:
                     for fn in [f"{prefix}.{ext}", f"{mod_name}.{ext}"]:
                         # 直接检查当前目录
-                        p = sd / fn
-                        if p.exists() and str(p) not in extras and p.name != exclude_name:
-                            extras.append(str(p))
-                        # 递归检查子目录 (例如 lib/{MEM_NAME}/{MEM_NAME}.v)
-                        for rp in sd.rglob(fn):
-                            if rp.is_file() and str(rp) not in extras and rp.name != exclude_name:
-                                extras.append(str(rp))
+                        p1 = sd / fn
+                        if p1.exists() and str(p1) not in extras and p1.name != exclude_name:
+                            extras.append(str(p1))
+                            log(f"      [Lib Found] {p1}", echo=False)
+                        # 检查 lib/{mod_name}/{mod_name}.v 结构
+                        p2 = sd / mod_name / fn
+                        if p2.exists() and str(p2) not in extras and p2.name != exclude_name:
+                            extras.append(str(p2))
+                            log(f"      [Lib Found] {p2}", echo=False)
+                        # 检查 lib/{prefix}/{prefix}.v 结构
+                        p3 = sd / prefix / fn
+                        if p3.exists() and str(p3) not in extras and p3.name != exclude_name:
+                            extras.append(str(p3))
+                            log(f"      [Lib Found] {p3}", echo=False)
             
             return extras
 
@@ -356,6 +363,7 @@ def main():
                     if syn_p.exists():
                         emu_extra.append(str(syn_p))
                         has_syn = True
+                        log(f"      [Syn Found] {syn_p}", echo=False)
                     else:
                         emu_extra.append(nx)
                 elif nx_p.suffix == '.sv':
@@ -363,12 +371,16 @@ def main():
                     if syn_p.exists():
                         emu_extra.append(str(syn_p))
                         has_syn = True
+                        log(f"      [Syn Found] {syn_p}", echo=False)
                     else:
                         emu_extra.append(nx)
                 else:
                     emu_extra.append(nx)
             if has_syn:
                 emu_f = new_f
+            else:
+                emu_extra = []
+                log(f"      [Info] No _syn.v found, skipping EMU side.", echo=False)
 
         inst = {
             "name": orig_f.stem,

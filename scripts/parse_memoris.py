@@ -138,6 +138,8 @@ def main():
                         help="emu wrapper 目录 (可选, 如 ./memory_wrapper_emu)")
     parser.add_argument("--dir", type=str, default=None,
                         help="单目录模式 (orig=new)")
+    parser.add_argument("--lib", type=str, default=None,
+                        help="外部 lib 目录路径 (可选，用于覆盖默认的相对 lib 目录)")
     parser.add_argument("--output", type=str, default="",
                         help="输出 YAML 路径 (默认: stdout)")
     parser.add_argument("--log", type=str, default="",
@@ -163,6 +165,8 @@ def main():
         parser.print_help()
         print("\n错误: 请指定 --orig + --new, 或 --dir")
         sys.exit(1)
+        
+    user_lib_dir = Path(args.lib).resolve() if args.lib else None
 
     # ── 日志 ──
     log_lines = []
@@ -176,6 +180,8 @@ def main():
     log(f"  new  → {new_dir}  ({resolve_symlink(new_dir)})")
     if emu_dir:
         log(f"  emu  → {emu_dir}  ({resolve_symlink(emu_dir)})")
+    if user_lib_dir:
+        log(f"  lib  → {user_lib_dir}  ({resolve_symlink(user_lib_dir)})")
     log()
 
     dirs_to_check = [(orig_dir, "orig"), (new_dir, "new")]
@@ -294,7 +300,7 @@ def main():
         prefix = stem.removesuffix("_mem_wrap") if stem.endswith("_mem_wrap") else stem
         low_glob = f"{prefix}_low_mem_wrap.*"
 
-        def discover_extra_files(base_dir, exclude_name, mod_name):
+        def discover_extra_files(base_dir, exclude_name, mod_name, custom_lib_dir=None):
             """优先 filelist，否则只收集 {prefix}_low_mem_wrap.* 和 base libs """
             fl = find_filelist(base_dir)
             if fl:
@@ -307,7 +313,9 @@ def main():
             
             # Discover base memory macro files
             search_dirs = [base_dir]
-            if (base_dir / "lib").exists():
+            if custom_lib_dir and custom_lib_dir.exists():
+                search_dirs.append(custom_lib_dir)
+            elif (base_dir / "lib").exists():
                 search_dirs.append(base_dir / "lib")
             
             for sd in search_dirs:
@@ -319,8 +327,8 @@ def main():
             
             return extras
 
-        orig_extra = discover_extra_files(orig_f.parent, orig_f.name, mod)
-        new_extra  = discover_extra_files(new_f.parent if new_f else new_dir, new_f.name if new_f else "", mod)
+        orig_extra = discover_extra_files(orig_f.parent, orig_f.name, mod, user_lib_dir)
+        new_extra  = discover_extra_files(new_f.parent if new_f else new_dir, new_f.name if new_f else "", mod, user_lib_dir)
 
         # Find emu file
         emu_f = None
@@ -332,7 +340,7 @@ def main():
                     if ef.name == orig_f.name:
                         emu_f = ef
                         break
-            emu_extra = discover_extra_files(emu_f.parent if emu_f else emu_dir, emu_f.name if emu_f else "", mod)
+            emu_extra = discover_extra_files(emu_f.parent if emu_f else emu_dir, emu_f.name if emu_f else "", mod, user_lib_dir)
         else:
             # Auto-discover emulation models from new side
             has_syn = False

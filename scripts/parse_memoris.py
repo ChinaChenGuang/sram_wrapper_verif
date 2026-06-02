@@ -393,7 +393,15 @@ def main():
                     if ef.name == orig_f.name:
                         emu_f = ef
                         break
-            emu_extra = discover_extra_files(emu_f.parent if emu_f else emu_dir, emu_f.name if emu_f else "", mod, user_lib_dir)
+            # 必须为 emu 查找 _syn 文件
+            emu_extra = discover_extra_files(emu_f.parent if emu_f else emu_dir, emu_f.name if emu_f else "", mod, user_lib_dir, find_syn=True)
+            
+            # 如果不存在_syn 先不例化emu
+            has_syn = any(p.endswith("_syn.v") or p.endswith("_syn.sv") for p in emu_extra)
+            if not has_syn:
+                emu_extra = []
+                emu_f = None
+                log(f"      [Info] No _syn.v found in emu_dir, skipping EMU side.", echo=False)
         else:
             # Auto-discover emulation models from new side
             has_syn = False
@@ -410,13 +418,15 @@ def main():
                 lib_p = Path(lib)
                 if "low_mem_wrap" not in lib_p.name and str(lib_p) not in emu_extra:
                     emu_extra.append(str(lib_p))
-                    has_syn = True
-                    log(f"      [Syn Found] {lib_p}", echo=False)
+                    # 严格判断是否真的找到了 _syn 结尾的文件
+                    if lib_p.name.endswith("_syn.v") or lib_p.name.endswith("_syn.sv"):
+                        has_syn = True
+                        log(f"      [Syn Found] {lib_p}", echo=False)
             if has_syn:
                 emu_f = new_f
             else:
                 emu_extra = []
-                log(f"      [Info] No _syn.v found, skipping EMU side.", echo=False)
+                log(f"      [Info] No _syn.v found via auto-discovery, skipping EMU side.", echo=False)
 
         inst = {
             "name": orig_f.stem,

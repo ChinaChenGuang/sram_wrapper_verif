@@ -351,8 +351,12 @@ def main():
                             except: pass
                     
                     if wrapper_content:
+                        log(f"      [Debug] Smart scanning dir: {sd}", echo=True)
                         for ext in ["v", "sv"]:
+                            # rglob returns a generator, so we print before starting
+                            log(f"      [Debug] Starting rglob for *.{ext} in {sd}", echo=True)
                             for lp in sd.rglob(f"*.{ext}"):
+                                log(f"      [Debug] Checking file: {lp}", echo=True)
                                 stem = lp.stem
                                 # 假设库文件可能是 mem_lib.v 或 mem_lib_syn.v
                                 base_stem = stem[:-4] if stem.endswith("_syn") else stem

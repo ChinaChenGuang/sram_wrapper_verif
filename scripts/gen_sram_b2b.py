@@ -595,7 +595,8 @@ def main():
             with open(main_fl_path, "w") as f:
                 for s_dir, srcs in lib_srcs.items():
                     if srcs:
-                        f.write(f"-f lib/{s_dir}/{s_dir}_lib.f\n")
+                        out_rel = out_dir.relative_to(PROJ_ROOT)
+                        f.write(f"-f ./{out_rel}/lib/{s_dir}/{s_dir}_lib.f\n")
                 for src in sorted(wrapper_srcs):
                     f.write(f"{src}\n")
             LOG.write(f"\n✓ Main Filelist: {main_fl_path}")

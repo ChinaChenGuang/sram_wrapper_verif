@@ -23,12 +23,16 @@ class mem_driver #(
         mem_item #(AW, DW) req;
         `uvm_info(get_type_name(), "Driver started", UVM_LOW)
         
-        // Initial state
-        vif.ce    <= 1'b0;
-        vif.we    <= 1'b0;
+        // Initial state (Inactive)
+        vif.ce    <= 1'b1; // Active low
+        vif.we    <= 1'b1; // Active low
         vif.addr  <= '0;
         vif.wdata <= '0;
         vif.wem   <= '1;
+
+        // Wait for reset to deassert and wait a few clocks
+        wait (vif.rst_n === 1'b1);
+        repeat (5) @(posedge vif.clk);
 
         forever begin
             seq_item_port.get_next_item(req);

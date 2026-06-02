@@ -301,6 +301,9 @@ def main():
         low_glob = f"{prefix}_low_mem_wrap.*"
 
         def discover_extra_files(base_dir, exclude_name, mod_name, custom_lib_dir=None, find_syn=False):
+            # Cache rglob results to avoid scanning disk multiple times for different instances
+            if not hasattr(discover_extra_files, "rglob_cache"):
+                discover_extra_files.rglob_cache = {}
             """优先 filelist，否则只收集 {prefix}_low_mem_wrap.* 和 base libs """
             fl = find_filelist(base_dir)
             if fl:
@@ -354,14 +357,21 @@ def main():
                         # 预先提取 wrapper 中所有的单词作为 O(1) 查找表，避免在循环中疯狂编译正则导致卡死
                         wrapper_words = set(re.findall(r'[A-Za-z_]\w*', wrapper_content))
                         
-                        for ext in ["v", "sv"]:
-                            for lp in sd.rglob(f"*.{ext}"):
-                                stem = lp.stem
-                                # 假设库文件可能是 mem_lib.v 或 mem_lib_syn.v
-                                base_stem = stem[:-4] if stem.endswith("_syn") else stem
-                                
-                                # 直接用 O(1) 的哈希表查找替换 O(N) 的正则搜索
-                                if base_stem and base_stem in wrapper_words:
+                        # 使用缓存的 rglob 列表，避免重复扫盘
+                        sd_path_str = str(sd)
+                        if sd_path_str not in discover_extra_files.rglob_cache:
+                            all_v_sv = []
+                            for ext in ["v", "sv"]:
+                                all_v_sv.extend(list(sd.rglob(f"*.{ext}")))
+                            discover_extra_files.rglob_cache[sd_path_str] = all_v_sv
+                            
+                        for lp in discover_extra_files.rglob_cache[sd_path_str]:
+                            stem = lp.stem
+                            # 假设库文件可能是 mem_lib.v 或 mem_lib_syn.v
+                            base_stem = stem[:-4] if stem.endswith("_syn") else stem
+                            
+                            # 直接用 O(1) 的哈希表查找替换 O(N) 的正则搜索
+                            if base_stem and base_stem in wrapper_words:
                                     is_syn_file = stem.endswith("_syn")
                                     if find_syn and is_syn_file:
                                         if str(lp) not in extras:

@@ -351,28 +351,26 @@ def main():
                             except: pass
                     
                     if wrapper_content:
-                        log(f"      [Debug] Smart scanning dir: {sd}", echo=True)
+                        # 预先提取 wrapper 中所有的单词作为 O(1) 查找表，避免在循环中疯狂编译正则导致卡死
+                        wrapper_words = set(re.findall(r'[A-Za-z_]\w*', wrapper_content))
+                        
                         for ext in ["v", "sv"]:
-                            # rglob returns a generator, so we print before starting
-                            log(f"      [Debug] Starting rglob for *.{ext} in {sd}", echo=True)
                             for lp in sd.rglob(f"*.{ext}"):
-                                log(f"      [Debug] Checking file: {lp}", echo=True)
                                 stem = lp.stem
                                 # 假设库文件可能是 mem_lib.v 或 mem_lib_syn.v
                                 base_stem = stem[:-4] if stem.endswith("_syn") else stem
                                 
-                                if base_stem and len(base_stem) > 2 and base_stem in wrapper_content:
-                                    # 确认是作为一个独立的单词出现 (大概率是模块例化)
-                                    if re.search(r'\b' + re.escape(base_stem) + r'\b', wrapper_content):
-                                        is_syn_file = stem.endswith("_syn")
-                                        if find_syn and is_syn_file:
-                                            if str(lp) not in extras:
-                                                extras.append(str(lp))
-                                                log(f"      [Smart Lib Found (Syn)] {lp}", echo=False)
-                                        elif not find_syn and not is_syn_file:
-                                            if str(lp) not in extras:
-                                                extras.append(str(lp))
-                                                log(f"      [Smart Lib Found] {lp}", echo=False)
+                                # 直接用 O(1) 的哈希表查找替换 O(N) 的正则搜索
+                                if base_stem and base_stem in wrapper_words:
+                                    is_syn_file = stem.endswith("_syn")
+                                    if find_syn and is_syn_file:
+                                        if str(lp) not in extras:
+                                            extras.append(str(lp))
+                                            log(f"      [Smart Lib Found (Syn)] {lp}", echo=False)
+                                    elif not find_syn and not is_syn_file:
+                                        if str(lp) not in extras:
+                                            extras.append(str(lp))
+                                            log(f"      [Smart Lib Found] {lp}", echo=False)
             
             return extras
 

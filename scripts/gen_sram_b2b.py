@@ -315,7 +315,8 @@ def main():
     if args.dry_run:
         LOG.write(">>> DRY RUN <<<")
 
-    all_gen_srcs = []
+    wrapper_srcs = set()
+    lib_srcs = {"bm": set(), "em": set(), "orig": set()}
     ok = fail = 0
     failures = []  # track failure reasons per instance
 
@@ -435,18 +436,30 @@ def main():
         # ── 生成重命名文件 ──
         for side, sfx in sides_to_process:
             file_paths, rename_map = inst_data[side]
+            side_lib_dir = "bm" if side == "new" else ("em" if side == "emu" else "orig")
+            
             for src_path in file_paths:
                 stem = src_path.stem
-                dst_name = f"{stem}_{side}.v"
-                dst_path = out_dir / dst_name
+                is_wrapper = "_mem_wrap" in src_path.name
+                
+                if is_wrapper:
+                    dst_name = f"{stem}_{side}.v"
+                    dst_path = out_dir / dst_name
+                else:
+                    dst_name = src_path.name
+                    dst_path = out_dir / "lib" / side_lib_dir / dst_name
 
                 if args.dry_run:
-                    LOG.write(f"  → {dst_name}")
+                    LOG.write(f"  → {dst_path}")
                     ok += 1
                 else:
                     if rename_modules_in_file(src_path, rename_map, dst_path, LOG):
-                        LOG.write(f"  ✓ {dst_name}")
-                        all_gen_srcs.append(dst_path)
+                        if is_wrapper:
+                            LOG.write(f"  ✓ {dst_name}")
+                            wrapper_srcs.add(dst_path)
+                        else:
+                            LOG.write(f"  ✓ {dst_name} -> lib/{side_lib_dir}/")
+                            lib_srcs[side_lib_dir].add(dst_path)
                         ok += 1
                     else:
                         reason = f"重命名失败: {src_path.name}"
@@ -569,12 +582,26 @@ def main():
         LOG.write(f"\n✓ all_connect.sv (includes {len(connect_files)} connect files)")
 
     # ── 生成 filelist ──
-    fl_path = out_dir / "gen_sram_b2b.f"
-    if not args.dry_run and all_gen_srcs:
-        with open(fl_path, "w") as f:
-            for src in sorted(set(all_gen_srcs)):
-                f.write(f"{src}\n")
-        LOG.write(f"\n✓ Filelist: {fl_path}")
+    if not args.dry_run:
+        for s_dir, srcs in lib_srcs.items():
+            if srcs:
+                fl_name = f"{s_dir}_lib.f"
+                fl_path = out_dir / "lib" / s_dir / fl_name
+                fl_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(fl_path, "w") as f:
+                    for src in sorted(srcs):
+                        f.write(f"{src}\n")
+                LOG.write(f"\n✓ Lib Filelist: {fl_path}")
+                
+        main_fl_path = out_dir / "gen_sram_b2b.f"
+        if wrapper_srcs:
+            with open(main_fl_path, "w") as f:
+                for s_dir, srcs in lib_srcs.items():
+                    if srcs:
+                        f.write(f"-f lib/{s_dir}/{s_dir}_lib.f\n")
+                for src in sorted(wrapper_srcs):
+                    f.write(f"{src}\n")
+            LOG.write(f"\n✓ Main Filelist: {main_fl_path}")
 
     # ── 总结 ──
     LOG.write(f"\n{'='*50}")

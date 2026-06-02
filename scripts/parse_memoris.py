@@ -436,7 +436,7 @@ def main():
             "num_word": params.get("num_word", "?"),
             "orig_path": str(orig_f),
             "new_path": str(new_f) if new_f else str(new_dir / orig_f.name),
-            "emu_path": str(emu_f) if emu_f else (str(emu_dir / orig_f.name) if emu_dir else ""),
+            "emu_path": str(emu_f) if emu_f else "",
             "orig_extra": orig_extra,
             "new_extra": new_extra,
             "emu_extra": emu_extra,

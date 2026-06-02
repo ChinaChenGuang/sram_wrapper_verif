@@ -440,7 +440,7 @@ def main():
                 is_wrapper = "_mem_wrap" in src_path.name
                 
                 if is_wrapper:
-                    dst_name = f"{stem}_{side}.v"
+                    dst_name = f"{stem}{sfx}.v"
                     dst_path = out_dir / dst_name
                 else:
                     dst_name = src_path.name

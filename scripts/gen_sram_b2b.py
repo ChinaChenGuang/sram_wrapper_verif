@@ -495,7 +495,7 @@ def main():
             f"logic [{dw}-1:0] data_mask_{name} = '1;",
             f"logic [{dw}-1:0] rdata_a_ori_{name}, rdata_b_ori_{name};",
             f"logic [{dw}-1:0] rdata_a_new_{name}, rdata_b_new_{name};",
-            f"logic [{dw}-1:0] rdata_a_emu_{name} = '0, rdata_b_emu_{name} = '0;",
+            f"logic [{dw}-1:0] rdata_a_emu_{name}, rdata_b_emu_{name};",
             "",
             f"`ifndef RDATA_DRIVEN",
             f"    `define RDATA_DRIVEN",
@@ -505,6 +505,11 @@ def main():
             f"    assign rdata_b_new = rdata_b_new_{name};",
             f"`endif",
             ""]
+        if "emu" not in inst_data:
+            connect_lines.extend([
+                f"    assign rdata_a_emu_{name} = '0;",
+                f"    assign rdata_b_emu_{name} = '0;"
+            ])
 
         instances_to_connect = [("ori", ori_top, "_ori"), ("new", new_top, "_new")]
         if "emu" in inst_data:

@@ -22,6 +22,7 @@ module mem_sva_checker #(
     input logic [DATA_WIDTH-1:0] data_mask
 );
 
+    localparam MEM_NOP  = 2'b00;
     localparam MEM_READ = 2'b01;
 
     import uvm_pkg::*;
@@ -34,7 +35,7 @@ module mem_sva_checker #(
         |-> ##READ_LATENCY
         (((rdata_ori & data_mask) === (rdata_new & data_mask)) &&
         !$isunknown(rdata_ori & data_mask) &&
-        !$isunknown(rdata_new & data_mask)) until (cmd != MEM_READ);
+        !$isunknown(rdata_new & data_mask)) until_with (cmd != MEM_NOP);
     endproperty
 
     assert_ab: assert property(p_ab_compare)
@@ -49,7 +50,7 @@ module mem_sva_checker #(
         |-> ##READ_LATENCY
         (((rdata_new & data_mask) === (rdata_emu & data_mask)) &&
         !$isunknown(rdata_new & data_mask) &&
-        !$isunknown(rdata_emu & data_mask)) until (cmd != MEM_READ);
+        !$isunknown(rdata_emu & data_mask)) until_with (cmd != MEM_NOP);
     endproperty
 
     assert_emu: assert property(p_emu_compare)

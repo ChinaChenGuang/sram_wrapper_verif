@@ -32,9 +32,9 @@ module mem_sva_checker #(
         @(posedge clk) disable iff (!rst_n)
         (cmd == MEM_READ)
         |-> ##READ_LATENCY
-        ((rdata_ori & data_mask) === (rdata_new & data_mask)) &&
+        (((rdata_ori & data_mask) === (rdata_new & data_mask)) &&
         !$isunknown(rdata_ori & data_mask) &&
-        !$isunknown(rdata_new & data_mask);
+        !$isunknown(rdata_new & data_mask)) until (cmd != MEM_READ);
     endproperty
 
     assert_ab: assert property(p_ab_compare)
@@ -47,9 +47,9 @@ module mem_sva_checker #(
         @(posedge clk) disable iff (!rst_n || !has_emu)
         (cmd == MEM_READ)
         |-> ##READ_LATENCY
-        ((rdata_new & data_mask) === (rdata_emu & data_mask)) &&
+        (((rdata_new & data_mask) === (rdata_emu & data_mask)) &&
         !$isunknown(rdata_new & data_mask) &&
-        !$isunknown(rdata_emu & data_mask);
+        !$isunknown(rdata_emu & data_mask)) until (cmd != MEM_READ);
     endproperty
 
     assert_emu: assert property(p_emu_compare)

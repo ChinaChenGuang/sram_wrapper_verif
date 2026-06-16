@@ -2,7 +2,7 @@
 // mem_wem_walking_seq — Write with walking WEM mask
 // ============================================================
 
-class mem_wem_walking_seq #(int AW=10, int DW=32) extends mem_base_seq #(AW, DW);
+class mem_wem_walking_seq #(int AW=16, int DW=256) extends mem_base_seq #(AW, DW);
     `uvm_object_param_utils(mem_wem_walking_seq #(AW, DW));
     function new(string n="mem_wem_walking_seq"); super.new(n); endfunction
     task body();

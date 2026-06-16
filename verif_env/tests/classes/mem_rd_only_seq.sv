@@ -2,7 +2,7 @@
 // mem_rd_only_seq — Read-only helper sequence
 // ============================================================
 
-class mem_rd_only_seq #(int AW=10, int DW=32) extends mem_base_seq #(AW, DW);
+class mem_rd_only_seq #(int AW=16, int DW=256) extends mem_base_seq #(AW, DW);
     `uvm_object_param_utils(mem_rd_only_seq #(AW, DW));
     function new(string n="mem_rd_only_seq"); super.new(n); endfunction
     task body();

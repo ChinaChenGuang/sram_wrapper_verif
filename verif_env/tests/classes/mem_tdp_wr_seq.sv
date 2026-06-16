@@ -2,7 +2,7 @@
 // mem_tdp_wr_seq — TDP Write Port (addr < depth/2)
 // ============================================================
 
-class mem_tdp_wr_seq #(int AW=10, int DW=32) extends mem_base_seq #(AW, DW);
+class mem_tdp_wr_seq #(int AW=16, int DW=256) extends mem_base_seq #(AW, DW);
     `uvm_object_param_utils(mem_tdp_wr_seq #(AW, DW));
     function new(string n="mem_tdp_wr_seq"); super.new(n); endfunction
     task body();

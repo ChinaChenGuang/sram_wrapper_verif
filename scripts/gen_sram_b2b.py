@@ -95,15 +95,13 @@ def scan_module_names(file_paths: list) -> set:
 def strip_latches_from_content(content: str) -> str:
     def replacer(match):
         chunk = match.group(0)
-        m_decl_full = re.search(r'\bmodule\s+(\w+)\b[\s\S]*?;', chunk)
-        if not m_decl_full: return chunk
-        mod_name = m_decl_full.group(1)
+        m_first_mod = re.search(r'\bmodule\s+(\w+)\b', chunk)
+        if not m_first_mod: return chunk
+        mod_name = m_first_mod.group(1)
         
         # DO NOT PROCESS core module (or any module ending in _core)
         if mod_name.endswith("_core"):
             return chunk
-            
-        module_decl_str = m_decl_full.group(0)
         
         # Extract ports for instantiation
         ports = []
@@ -118,13 +116,14 @@ def strip_latches_from_content(content: str) -> str:
         for m in re.finditer(r'\b(?:input|output|inout)\b([^;]+);', chunk):
             extract_ports_from_decl(m.group(1))
             
-        m_paren = re.search(r'\(([\s\S]*)\)', module_decl_str)
-        if m_paren:
-            inner = m_paren.group(1)
-            for port_def in inner.split(','):
-                if re.search(r'\b(?:input|output|inout)\b', port_def):
-                    clean_def = re.sub(r'\b(?:input|output|inout)\b', '', port_def)
-                    extract_ports_from_decl(clean_def)
+        for m_mod in re.finditer(r'\bmodule\s+\w+\b([\s\S]*?);', chunk):
+            m_paren = re.search(r'\(([\s\S]*)\)', m_mod.group(1))
+            if m_paren:
+                inner = m_paren.group(1)
+                for port_def in inner.split(','):
+                    if re.search(r'\b(?:input|output|inout)\b', port_def):
+                        clean_def = re.sub(r'\b(?:input|output|inout)\b', '', port_def)
+                        extract_ports_from_decl(clean_def)
 
         unique_ports = []
         for p in ports:
@@ -155,22 +154,20 @@ def strip_latches_from_content(content: str) -> str:
         if not submodule_name:
             return chunk # fallback
 
-        # Extract items to keep from the body
-        body = chunk[m_decl_full.end() : chunk.rfind('endmodule')]
-        keep_pattern = r'(\b(?:input|output|inout|parameter|localparam)\b[\s\S]*?;|`(?:ifdef|ifndef|else|elsif|endif)\b[^\n]*)'
+        # Extract items to keep from the entire chunk
+        keep_pattern = re.compile(r'^\s*(?:(`ifdef\b|`ifndef\b|`else\b|`elsif\b|`endif\b)[^\n]*|(\binput\b|\boutput\b|\binout\b|\bparameter\b|\blocalparam\b|\bmodule\b)[^;]*;?)', re.MULTILINE)
         
         kept_items = []
-        for m in re.finditer(keep_pattern, body):
-            text = m.group(1).strip()
-            if text.startswith("`"):
+        body = chunk[:chunk.rfind('endmodule')]
+        for m in keep_pattern.finditer(body):
+            text = m.group(0).strip()
+            if text.startswith("`") or text.startswith("module"):
                 kept_items.append(text)
             else:
                 kept_items.append("  " + text)
 
         out_lines = []
         out_lines.append("// AUTO-GENERATED: Latch removed, kept IO, directives and submodule instance")
-        out_lines.append(module_decl_str)
-        out_lines.append("")
         for d in kept_items:
             out_lines.append(d)
         out_lines.append("")

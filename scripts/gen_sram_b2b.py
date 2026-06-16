@@ -10,7 +10,7 @@
 #   python3 scripts/gen_sram_b2b.py --dry-run
 # ============================================================
 
-import os, re, sys, argparse
+import os, re, sys, argparse, math
 import datetime
 import shutil
 from pathlib import Path

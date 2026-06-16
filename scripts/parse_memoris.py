@@ -130,13 +130,13 @@ def main():
     parser = argparse.ArgumentParser(
         description="解析 memory wrapper 目录，生成 B2B 验证配置"
     )
-    parser.add_argument("--orig", type=str, default=None,
+    parser.add_argument("--orig", nargs='+', default=None,
                         help="orig wrapper 目录 (如 ./memory_wrapper_orig)")
-    parser.add_argument("--new", type=str, default=None,
+    parser.add_argument("--new", nargs='+', default=None,
                         help="new wrapper 目录 (如 ./memory_wrapper_new)")
-    parser.add_argument("--emu", type=str, default=None,
+    parser.add_argument("--emu", nargs='+', default=None,
                         help="emu wrapper 目录 (可选, 如 ./memory_wrapper_emu)")
-    parser.add_argument("--dir", type=str, default=None,
+    parser.add_argument("--dir", nargs='+', default=None,
                         help="单目录模式 (orig=new)")
     parser.add_argument("--lib", type=str, default=None,
                         help="外部 lib 目录路径 (可选，用于覆盖默认的相对 lib 目录)")
@@ -149,18 +149,17 @@ def main():
     args = parser.parse_args()
 
     # ── 确定目录 ──
-    emu_dir = None
+    emu_dirs = []
     if args.orig and args.new:
-        orig_dir = Path(args.orig).resolve()
-        new_dir  = Path(args.new).resolve()
+        orig_dirs = [Path(d).resolve() for d in args.orig]
+        new_dirs  = [Path(d).resolve() for d in args.new]
         if args.emu:
-            emu_dir = Path(args.emu).resolve()
+            emu_dirs = [Path(d).resolve() for d in args.emu]
     elif args.dir:
-        orig_dir = Path(args.dir).resolve()
-        new_dir  = orig_dir
-        # emu_dir = orig_dir if they want to use one dir for all, but let's keep it None unless specified via --emu, or we can just set it to orig_dir if they want to test identicals.
+        orig_dirs = [Path(d).resolve() for d in args.dir]
+        new_dirs  = orig_dirs
         if args.emu:
-            emu_dir = Path(args.emu).resolve()
+            emu_dirs = [Path(d).resolve() for d in args.emu]
     else:
         parser.print_help()
         print("\n错误: 请指定 --orig + --new, 或 --dir")
@@ -176,17 +175,14 @@ def main():
             print(msg)
 
     log(f"parse_memoris.py — {datetime.datetime.now()}")
-    log(f"  orig → {orig_dir}  ({resolve_symlink(orig_dir)})")
-    log(f"  new  → {new_dir}  ({resolve_symlink(new_dir)})")
-    if emu_dir:
-        log(f"  emu  → {emu_dir}  ({resolve_symlink(emu_dir)})")
+    for d in orig_dirs: log(f"  orig → {d}  ({resolve_symlink(d)})")
+    for d in new_dirs:  log(f"  new  → {d}  ({resolve_symlink(d)})")
+    for d in emu_dirs:  log(f"  emu  → {d}  ({resolve_symlink(d)})")
     if user_lib_dir:
         log(f"  lib  → {user_lib_dir}  ({resolve_symlink(user_lib_dir)})")
     log()
 
-    dirs_to_check = [(orig_dir, "orig"), (new_dir, "new")]
-    if emu_dir:
-        dirs_to_check.append((emu_dir, "emu"))
+    dirs_to_check = [(d, "orig") for d in orig_dirs] + [(d, "new") for d in new_dirs] + [(d, "emu") for d in emu_dirs]
 
     for d, label in dirs_to_check:
         if not d.exists():
@@ -197,9 +193,14 @@ def main():
             (f" → {os.readlink(str(d))}" if is_link else ""))
 
     # ── 扫描 wrapper 文件 ──
-    all_orig_files = find_wrapper_files(orig_dir)
-    all_new_files  = find_wrapper_files(new_dir)
-    all_emu_files  = find_wrapper_files(emu_dir) if emu_dir else []
+    all_orig_files = []
+    for d in orig_dirs: all_orig_files.extend(find_wrapper_files(d))
+    
+    all_new_files = []
+    for d in new_dirs: all_new_files.extend(find_wrapper_files(d))
+    
+    all_emu_files = []
+    for d in emu_dirs: all_emu_files.extend(find_wrapper_files(d))
 
     # 只解析顶层 _mem_wrap.v（非 _low_ / _sub_），子模块不需要解析参数
     orig_top_files = [f for f in all_orig_files
@@ -289,7 +290,13 @@ def main():
     for orig_f, params in instances:
         mod = params.get("module_name", orig_f.stem)
         stem = orig_f.stem
-        new_f = new_dir / orig_f.name if (new_dir / orig_f.name).exists() else None
+        
+        new_f = None
+        for nd in new_dirs:
+            if (nd / orig_f.name).exists():
+                new_f = nd / orig_f.name
+                break
+        
         if not new_f:
             for nf in all_new_files:
                 if nf.name == orig_f.name:
@@ -381,20 +388,23 @@ def main():
             return extras
 
         orig_extra = discover_extra_files(orig_f.parent, orig_f.name, mod, user_lib_dir)
-        new_extra  = discover_extra_files(new_f.parent if new_f else new_dir, new_f.name if new_f else "", mod, user_lib_dir)
+        new_extra  = discover_extra_files(new_f.parent if new_f else new_dirs[0], new_f.name if new_f else "", mod, user_lib_dir)
 
         # Find emu file
         emu_f = None
         emu_extra = []
-        if emu_dir:
-            emu_f = emu_dir / orig_f.name if (emu_dir / orig_f.name).exists() else None
+        if emu_dirs:
+            for ed in emu_dirs:
+                if (ed / orig_f.name).exists():
+                    emu_f = ed / orig_f.name
+                    break
             if not emu_f:
                 for ef in all_emu_files:
                     if ef.name == orig_f.name:
                         emu_f = ef
                         break
             # 必须为 emu 查找 _syn 文件
-            emu_extra = discover_extra_files(emu_f.parent if emu_f else emu_dir, emu_f.name if emu_f else "", mod, user_lib_dir, find_syn=True)
+            emu_extra = discover_extra_files(emu_f.parent if emu_f else emu_dirs[0], emu_f.name if emu_f else "", mod, user_lib_dir, find_syn=True)
             
             # 如果不存在_syn 先不例化emu
             has_syn = any(p.endswith("_syn.v") or p.endswith("_syn.sv") for p in emu_extra)
@@ -413,7 +423,7 @@ def main():
                     emu_extra.append(nx)
             
             # 2. 显式查找 _syn 库文件
-            emu_libs = discover_extra_files(new_f.parent if new_f else new_dir, new_f.name if new_f else "", mod, user_lib_dir, find_syn=True)
+            emu_libs = discover_extra_files(new_f.parent if new_f else new_dirs[0], new_f.name if new_f else "", mod, user_lib_dir, find_syn=True)
             for lib in emu_libs:
                 lib_p = Path(lib)
                 if "low_mem_wrap" not in lib_p.name and str(lib_p) not in emu_extra:
@@ -435,7 +445,7 @@ def main():
             "addr_width": params.get("addr_width", "?"),
             "num_word": params.get("num_word", "?"),
             "orig_path": str(orig_f),
-            "new_path": str(new_f) if new_f else str(new_dir / orig_f.name),
+            "new_path": str(new_f) if new_f else str(new_dirs[0] / orig_f.name),
             "emu_path": str(emu_f) if emu_f else "",
             "orig_extra": orig_extra,
             "new_extra": new_extra,
@@ -478,8 +488,8 @@ def main():
 
     # ── 生成 YAML ──
     yaml_lines = ["# AUTO-GENERATED by parse_memoris.py",
-                  f"# orig: {orig_dir}  ({resolve_symlink(orig_dir)})",
-                  f"# new:  {new_dir}   ({resolve_symlink(new_dir)})",
+                  f"# orig: {', '.join(str(d) for d in orig_dirs)}",
+                  f"# new:  {', '.join(str(d) for d in new_dirs)}",
                   "",
                   "instances:"]
 

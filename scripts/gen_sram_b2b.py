@@ -90,13 +90,92 @@ def scan_module_names(file_paths: list) -> set:
             names.add(m.group(1))
     return names - {'endmodule', 'input', 'output', 'inout', 'parameter', 'localparam'}
 
+def strip_latches_from_content(content: str) -> str:
+    m_decl = re.search(r'\bmodule\s+(\w+)\b[\s\S]*?;', content)
+    if not m_decl: return content
+    module_name = m_decl.group(1)
+    module_decl_str = m_decl.group(0)
 
-def rename_modules_in_file(src_path: Path, rename_map: dict, dst_path: Path, log: Logger) -> bool:
+    ports = []
+    def extract_ports_from_decl(decl_body):
+        body = re.sub(r'\[[^\]]*\]', '', decl_body)
+        body = re.sub(r'\b(?:wire|reg|logic)\b', '', body)
+        for p in body.split(','):
+            p = p.strip()
+            m_id = re.search(r'\b([A-Za-z_]\w*)\b', p)
+            if m_id: ports.append(m_id.group(1))
+
+    for m in re.finditer(r'\b(?:input|output|inout)\b([^;]+);', content):
+        extract_ports_from_decl(m.group(1))
+        
+    m_paren = re.search(r'\(([\s\S]*)\)', module_decl_str)
+    if m_paren:
+        inner = m_paren.group(1)
+        for port_def in inner.split(','):
+            if re.search(r'\b(?:input|output|inout)\b', port_def):
+                clean_def = re.sub(r'\b(?:input|output|inout)\b', '', port_def)
+                extract_ports_from_decl(clean_def)
+
+    unique_ports = []
+    for p in ports:
+        if p not in unique_ports:
+            unique_ports.append(p)
+
+    keywords = {"module", "endmodule", "input", "output", "inout", "wire", "reg", "logic", "assign", "always", "always_comb", "always_ff", "always_latch", "parameter", "localparam", "if", "else", "generate", "endgenerate", "for", "begin", "end", "integer", "genvar", "case", "endcase", "initial"}
+    
+    inst_pattern = re.compile(r'\b([A-Za-z_]\w*)\s*(?:#\s*\([\s\S]*?\))?\s+([A-Za-z_]\w*)\s*\([\s\S]*?\)\s*;')
+    submodule_name = None
+    for m in inst_pattern.finditer(content):
+        mod = m.group(1)
+        if mod not in keywords:
+            submodule_name = mod
+            break
+
+    if not submodule_name:
+        lines = content.split(';')
+        for stmt in lines:
+            stmt = stmt.strip()
+            if not stmt: continue
+            words = re.findall(r'\b[A-Za-z_]\w*\b', stmt)
+            if words and words[0] not in keywords:
+                if len(words) >= 2 and '(' in stmt and ')' in stmt:
+                    submodule_name = words[0]
+                    break
+
+    if not submodule_name:
+        return content
+
+    decls_to_keep = []
+    for m in re.finditer(r'\b(?:input|output|inout|parameter|localparam)\b[\s\S]*?;', content):
+        if m.start() > m_decl.end():
+            decls_to_keep.append(m.group(0))
+
+    out_lines = []
+    out_lines.append("// AUTO-GENERATED: Latch removed, kept only IO and submodule instance")
+    out_lines.append(module_decl_str)
+    out_lines.append("")
+    for d in decls_to_keep:
+        out_lines.append("  " + d.strip())
+    out_lines.append("")
+    out_lines.append(f"  {submodule_name} u_inst_{submodule_name} (")
+    conn_lines = []
+    for p in unique_ports:
+        conn_lines.append(f"    .{p}({p})")
+    out_lines.append(",\n".join(conn_lines))
+    out_lines.append("  );")
+    out_lines.append("endmodule")
+    return "\n".join(out_lines) + "\n"
+
+
+def rename_modules_in_file(src_path: Path, rename_map: dict, dst_path: Path, log: Logger, strip_latches: bool = False) -> bool:
     if not src_path.exists():
         log.write(f"  FAIL: 源文件不存在: {src_path}")
         return False
 
     content = src_path.read_text(encoding="utf-8", errors="replace")
+
+    if strip_latches and ("_syn.v" in src_path.name or "_syn.sv" in src_path.name):
+        content = strip_latches_from_content(content)
 
     for old_name in sorted(rename_map.keys(), key=len, reverse=True):
         new_name = rename_map[old_name]
@@ -313,7 +392,7 @@ def main():
         LOG.write(">>> DRY RUN <<<")
 
     wrapper_srcs = set()
-    lib_srcs = {"bm": set(), "em": set(), "orig": set()}
+    lib_srcs = {"bm": set(), "em": set(), "orig": set(), "mod": set()}
     ok = fail = 0
     failures = []  # track failure reasons per instance
 
@@ -411,7 +490,9 @@ def main():
             for m in all_mods:
                 is_syn_lib = any(f.name == f"{m}_syn.v" or f.name == f"{m}_syn.sv" for f in file_paths)
                 if side == "emu" and is_syn_lib:
-                    rename_map[m] = f"{m}_syn"
+                    rename_map[m] = f"{m}_emu"
+                elif side == "mod":
+                    rename_map[m] = m
                 else:
                     rename_map[m] = f"{m}{sfx}"
             LOG.write(f"  [{side}] {len(file_paths)} files, {len(rename_map)} modules")
@@ -430,10 +511,16 @@ def main():
             failures.append((name, inst_fails))
             continue
 
+        if "emu" in inst_data:
+            mod_file_paths = inst_data["emu"][0]
+            mod_rename_map = {m: m for m in inst_data["emu"][1].keys()}
+            inst_data["mod"] = (mod_file_paths, mod_rename_map)
+            sides_to_process.append(("mod", ""))
+
         # ── 生成重命名文件 ──
         for side, sfx in sides_to_process:
             file_paths, rename_map = inst_data[side]
-            side_lib_dir = "bm" if side == "new" else ("em" if side == "emu" else "orig")
+            side_lib_dir = "bm" if side == "new" else ("em" if side == "emu" else ("mod" if side == "mod" else "orig"))
             
             for src_path in file_paths:
                 stem = src_path.stem
@@ -450,7 +537,7 @@ def main():
                     LOG.write(f"  → {dst_path}")
                     ok += 1
                 else:
-                    if rename_modules_in_file(src_path, rename_map, dst_path, LOG):
+                    if rename_modules_in_file(src_path, rename_map, dst_path, LOG, strip_latches=(side=="mod")):
                         if is_wrapper:
                             LOG.write(f"  ✓ {dst_name}")
                             wrapper_srcs.add(dst_path)

@@ -103,41 +103,19 @@ def strip_latches_from_content(content: str) -> str:
         if mod_name.endswith("_core"):
             return chunk
         
-        # Extract ports for instantiation
-        ports = []
-        def extract_ports_from_decl(decl_body):
-            body = re.sub(r'\[[^\]]*\]', '', decl_body)
-            body = re.sub(r'\b(?:wire|reg|logic)\b', '', body)
-            for p in body.split(','):
-                p = p.strip()
-                m_id = re.search(r'\b([A-Za-z_]\w*)\b', p)
-                if m_id: ports.append(m_id.group(1))
 
-        for m in re.finditer(r'\b(?:input|output|inout)\b([^;]+);', chunk):
-            extract_ports_from_decl(m.group(1))
-            
-        for m_mod in re.finditer(r'\bmodule\s+\w+\b([\s\S]*?);', chunk):
-            m_paren = re.search(r'\(([\s\S]*)\)', m_mod.group(1))
-            if m_paren:
-                inner = m_paren.group(1)
-                for port_def in inner.split(','):
-                    if re.search(r'\b(?:input|output|inout)\b', port_def):
-                        clean_def = re.sub(r'\b(?:input|output|inout)\b', '', port_def)
-                        extract_ports_from_decl(clean_def)
-
-        unique_ports = []
-        for p in ports:
-            if p not in unique_ports:
-                unique_ports.append(p)
 
         # Find submodule instance
         keywords = {"module", "endmodule", "input", "output", "inout", "wire", "reg", "logic", "assign", "always", "always_comb", "always_ff", "always_latch", "parameter", "localparam", "if", "else", "generate", "endgenerate", "for", "begin", "end", "integer", "genvar", "case", "endcase", "initial"}
         
         inst_pattern = re.compile(r'\b([A-Za-z_]\w*)\s*(?:#\s*\([\s\S]*?\))?\s+([A-Za-z_]\w*)\s*\([\s\S]*?\)\s*;')
         submodule_name = None
+        submodule_ports = []
         for m in inst_pattern.finditer(chunk):
             if m.group(1) not in keywords:
                 submodule_name = m.group(1)
+                port_list_part = chunk[m.end(2) : m.end()]
+                submodule_ports = re.findall(r'\.\s*([A-Za-z_]\w*)\s*\(', port_list_part)
                 break
 
         if not submodule_name:
@@ -149,6 +127,11 @@ def strip_latches_from_content(content: str) -> str:
                 if words and words[0] not in keywords:
                     if len(words) >= 2 and '(' in stmt and ')' in stmt:
                         submodule_name = words[0]
+                        inst_name = words[1]
+                        idx = stmt.find(inst_name)
+                        if idx != -1:
+                            port_list_part = stmt[idx + len(inst_name):]
+                            submodule_ports = re.findall(r'\.\s*([A-Za-z_]\w*)\s*\(', port_list_part)
                         break
 
         if not submodule_name:
@@ -173,7 +156,7 @@ def strip_latches_from_content(content: str) -> str:
         out_lines.append("")
         out_lines.append(f"  {submodule_name} u_inst_{submodule_name} (")
         conn_lines = []
-        for p in unique_ports:
+        for p in submodule_ports:
             conn_lines.append(f"    .{p}({p})")
         out_lines.append(",\n".join(conn_lines))
         out_lines.append("  );")

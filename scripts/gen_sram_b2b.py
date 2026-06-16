@@ -91,80 +91,99 @@ def scan_module_names(file_paths: list) -> set:
     return names - {'endmodule', 'input', 'output', 'inout', 'parameter', 'localparam'}
 
 def strip_latches_from_content(content: str) -> str:
-    m_decl = re.search(r'\bmodule\s+(\w+)\b[\s\S]*?;', content)
-    if not m_decl: return content
-    module_name = m_decl.group(1)
-    module_decl_str = m_decl.group(0)
-
-    ports = []
-    def extract_ports_from_decl(decl_body):
-        body = re.sub(r'\[[^\]]*\]', '', decl_body)
-        body = re.sub(r'\b(?:wire|reg|logic)\b', '', body)
-        for p in body.split(','):
-            p = p.strip()
-            m_id = re.search(r'\b([A-Za-z_]\w*)\b', p)
-            if m_id: ports.append(m_id.group(1))
-
-    for m in re.finditer(r'\b(?:input|output|inout)\b([^;]+);', content):
-        extract_ports_from_decl(m.group(1))
+    def replacer(match):
+        chunk = match.group(0)
+        m_decl_full = re.search(r'\bmodule\s+(\w+)\b[\s\S]*?;', chunk)
+        if not m_decl_full: return chunk
+        mod_name = m_decl_full.group(1)
         
-    m_paren = re.search(r'\(([\s\S]*)\)', module_decl_str)
-    if m_paren:
-        inner = m_paren.group(1)
-        for port_def in inner.split(','):
-            if re.search(r'\b(?:input|output|inout)\b', port_def):
-                clean_def = re.sub(r'\b(?:input|output|inout)\b', '', port_def)
-                extract_ports_from_decl(clean_def)
+        # DO NOT PROCESS core module (or any module ending in _core)
+        if mod_name.endswith("_core"):
+            return chunk
+            
+        module_decl_str = m_decl_full.group(0)
+        
+        # Extract ports for instantiation
+        ports = []
+        def extract_ports_from_decl(decl_body):
+            body = re.sub(r'\[[^\]]*\]', '', decl_body)
+            body = re.sub(r'\b(?:wire|reg|logic)\b', '', body)
+            for p in body.split(','):
+                p = p.strip()
+                m_id = re.search(r'\b([A-Za-z_]\w*)\b', p)
+                if m_id: ports.append(m_id.group(1))
 
-    unique_ports = []
-    for p in ports:
-        if p not in unique_ports:
-            unique_ports.append(p)
+        for m in re.finditer(r'\b(?:input|output|inout)\b([^;]+);', chunk):
+            extract_ports_from_decl(m.group(1))
+            
+        m_paren = re.search(r'\(([\s\S]*)\)', module_decl_str)
+        if m_paren:
+            inner = m_paren.group(1)
+            for port_def in inner.split(','):
+                if re.search(r'\b(?:input|output|inout)\b', port_def):
+                    clean_def = re.sub(r'\b(?:input|output|inout)\b', '', port_def)
+                    extract_ports_from_decl(clean_def)
 
-    keywords = {"module", "endmodule", "input", "output", "inout", "wire", "reg", "logic", "assign", "always", "always_comb", "always_ff", "always_latch", "parameter", "localparam", "if", "else", "generate", "endgenerate", "for", "begin", "end", "integer", "genvar", "case", "endcase", "initial"}
-    
-    inst_pattern = re.compile(r'\b([A-Za-z_]\w*)\s*(?:#\s*\([\s\S]*?\))?\s+([A-Za-z_]\w*)\s*\([\s\S]*?\)\s*;')
-    submodule_name = None
-    for m in inst_pattern.finditer(content):
-        mod = m.group(1)
-        if mod not in keywords:
-            submodule_name = mod
-            break
+        unique_ports = []
+        for p in ports:
+            if p not in unique_ports:
+                unique_ports.append(p)
 
-    if not submodule_name:
-        lines = content.split(';')
-        for stmt in lines:
-            stmt = stmt.strip()
-            if not stmt: continue
-            words = re.findall(r'\b[A-Za-z_]\w*\b', stmt)
-            if words and words[0] not in keywords:
-                if len(words) >= 2 and '(' in stmt and ')' in stmt:
-                    submodule_name = words[0]
-                    break
+        # Find submodule instance
+        keywords = {"module", "endmodule", "input", "output", "inout", "wire", "reg", "logic", "assign", "always", "always_comb", "always_ff", "always_latch", "parameter", "localparam", "if", "else", "generate", "endgenerate", "for", "begin", "end", "integer", "genvar", "case", "endcase", "initial"}
+        
+        inst_pattern = re.compile(r'\b([A-Za-z_]\w*)\s*(?:#\s*\([\s\S]*?\))?\s+([A-Za-z_]\w*)\s*\([\s\S]*?\)\s*;')
+        submodule_name = None
+        for m in inst_pattern.finditer(chunk):
+            if m.group(1) not in keywords:
+                submodule_name = m.group(1)
+                break
 
-    if not submodule_name:
-        return content
+        if not submodule_name:
+            lines = chunk.split(';')
+            for stmt in lines:
+                stmt = stmt.strip()
+                if not stmt: continue
+                words = re.findall(r'\b[A-Za-z_]\w*\b', stmt)
+                if words and words[0] not in keywords:
+                    if len(words) >= 2 and '(' in stmt and ')' in stmt:
+                        submodule_name = words[0]
+                        break
 
-    decls_to_keep = []
-    for m in re.finditer(r'\b(?:input|output|inout|parameter|localparam)\b[\s\S]*?;', content):
-        if m.start() > m_decl.end():
-            decls_to_keep.append(m.group(0))
+        if not submodule_name:
+            return chunk # fallback
 
-    out_lines = []
-    out_lines.append("// AUTO-GENERATED: Latch removed, kept only IO and submodule instance")
-    out_lines.append(module_decl_str)
-    out_lines.append("")
-    for d in decls_to_keep:
-        out_lines.append("  " + d.strip())
-    out_lines.append("")
-    out_lines.append(f"  {submodule_name} u_inst_{submodule_name} (")
-    conn_lines = []
-    for p in unique_ports:
-        conn_lines.append(f"    .{p}({p})")
-    out_lines.append(",\n".join(conn_lines))
-    out_lines.append("  );")
-    out_lines.append("endmodule")
-    return "\n".join(out_lines) + "\n"
+        # Extract items to keep from the body
+        body = chunk[m_decl_full.end() : chunk.rfind('endmodule')]
+        keep_pattern = r'(\b(?:input|output|inout|parameter|localparam)\b[\s\S]*?;|`(?:ifdef|ifndef|else|elsif|endif)\b[^\n]*)'
+        
+        kept_items = []
+        for m in re.finditer(keep_pattern, body):
+            text = m.group(1).strip()
+            if text.startswith("`"):
+                kept_items.append(text)
+            else:
+                kept_items.append("  " + text)
+
+        out_lines = []
+        out_lines.append("// AUTO-GENERATED: Latch removed, kept IO, directives and submodule instance")
+        out_lines.append(module_decl_str)
+        out_lines.append("")
+        for d in kept_items:
+            out_lines.append(d)
+        out_lines.append("")
+        out_lines.append(f"  {submodule_name} u_inst_{submodule_name} (")
+        conn_lines = []
+        for p in unique_ports:
+            conn_lines.append(f"    .{p}({p})")
+        out_lines.append(",\n".join(conn_lines))
+        out_lines.append("  );")
+        out_lines.append("endmodule")
+        return "\n".join(out_lines)
+
+    # Use re.sub to process only module blocks
+    new_content = re.sub(r'(?s)\bmodule\s+\w+\b.*?\bendmodule\b', replacer, content)
+    return new_content
 
 
 def rename_modules_in_file(src_path: Path, rename_map: dict, dst_path: Path, log: Logger, strip_latches: bool = False) -> bool:

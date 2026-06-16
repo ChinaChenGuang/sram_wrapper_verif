@@ -10,7 +10,9 @@
 #   python3 scripts/gen_sram_b2b.py --dry-run
 # ============================================================
 
-import os, re, sys, math, argparse
+import os, re, sys, argparse
+import datetime
+import shutil
 from pathlib import Path
 
 try:
@@ -409,6 +411,11 @@ def main():
     LOG.write(f"Output:    {out_dir}/")
     if args.dry_run:
         LOG.write(">>> DRY RUN <<<")
+    else:
+        if out_dir.exists():
+            shutil.rmtree(out_dir)
+            LOG.write(f"Cleaned previous output directory.")
+        out_dir.mkdir(parents=True, exist_ok=True)
 
     wrapper_srcs = set()
     lib_srcs = {"bm": set(), "em": set(), "orig": set(), "mod": set()}

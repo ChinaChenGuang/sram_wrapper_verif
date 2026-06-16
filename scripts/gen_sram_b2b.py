@@ -496,6 +496,7 @@ def main():
             f"logic [{dw}-1:0] rdata_a_ori_{name}, rdata_b_ori_{name};",
             f"logic [{dw}-1:0] rdata_a_new_{name}, rdata_b_new_{name};",
             f"logic [{dw}-1:0] rdata_a_emu_{name}, rdata_b_emu_{name};",
+            f"logic [{dw}-1:0] rdata_a_mod_{name}, rdata_b_mod_{name};",
             "",
             f"`ifndef RDATA_DRIVEN",
             f"    `define RDATA_DRIVEN",
@@ -508,12 +509,15 @@ def main():
         if "emu" not in inst_data:
             connect_lines.extend([
                 f"    assign rdata_a_emu_{name} = '0;",
-                f"    assign rdata_b_emu_{name} = '0;"
+                f"    assign rdata_b_emu_{name} = '0;",
+                f"    assign rdata_a_mod_{name} = '0;",
+                f"    assign rdata_b_mod_{name} = '0;"
             ])
 
         instances_to_connect = [("ori", ori_top, "_ori"), ("new", new_top, "_new")]
         if "emu" in inst_data:
             instances_to_connect.append(("emu", emu_top, "_emu"))
+            instances_to_connect.append(("mod", mod_name, "_mod"))
 
         for side, top_mod, postfix in instances_to_connect:
             tag = f"DUT {side.upper()}"
@@ -554,6 +558,7 @@ def main():
         connect_lines.append(f"    .rdata_ori (rdata_a_ori_{name}),")
         connect_lines.append(f"    .rdata_new (rdata_a_new_{name}),")
         connect_lines.append(f"    .rdata_emu (rdata_a_emu_{name}),")
+        connect_lines.append(f"    .rdata_mod (rdata_a_mod_{name}),")
         connect_lines.append(f"    .has_emu   ({has_emu}),")
         connect_lines.append(f"    .data_mask (data_mask_{name})")
         connect_lines.append(f");")

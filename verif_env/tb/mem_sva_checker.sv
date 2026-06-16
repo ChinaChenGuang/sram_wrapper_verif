@@ -18,6 +18,7 @@ module mem_sva_checker #(
     input logic [DATA_WIDTH-1:0] rdata_ori,
     input logic [DATA_WIDTH-1:0] rdata_new,
     input logic [DATA_WIDTH-1:0] rdata_emu,
+    input logic [DATA_WIDTH-1:0] rdata_mod,
     input logic has_emu,
     input logic [DATA_WIDTH-1:0] data_mask
 );
@@ -57,5 +58,20 @@ module mem_sva_checker #(
         else `uvm_error($sformatf("SVA-ERROR-%s-EMU", PORT_NAME), 
                         $sformatf("EMU Mismatch or X-state: NEW=%h, EMU=%h, MASK=%h", rdata_new, rdata_emu, data_mask));
     cover_emu: cover property(p_emu_compare);
+
+    // MOD comparison: rdata_new === rdata_mod
+    property p_mod_compare;
+        @(posedge clk) disable iff (!rst_n || !has_emu)
+        (cmd == MEM_READ)
+        |-> ##READ_LATENCY
+        (((rdata_new & data_mask) === (rdata_mod & data_mask)) &&
+        !$isunknown(rdata_new & data_mask) &&
+        !$isunknown(rdata_mod & data_mask)) until_with (cmd != MEM_NOP);
+    endproperty
+
+    assert_mod: assert property(p_mod_compare)
+        else `uvm_error($sformatf("SVA-ERROR-%s-MOD", PORT_NAME), 
+                        $sformatf("MOD Mismatch or X-state: NEW=%h, MOD=%h, MASK=%h", rdata_new, rdata_mod, data_mask));
+    cover_mod: cover property(p_mod_compare);
 
 endmodule

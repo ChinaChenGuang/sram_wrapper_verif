@@ -304,8 +304,11 @@ def main():
                     break
         
         # 查找 filelist / 自动发现 low_mem_wrap.v
-        prefix = stem.removesuffix("_mem_wrap") if stem.endswith("_mem_wrap") else stem
-        low_glob = f"{prefix}_low_mem_wrap.*"
+        prefix = stem
+        if prefix.endswith("_high_mem_wrap"):
+            prefix = prefix.removesuffix("_high_mem_wrap")
+        elif prefix.endswith("_mem_wrap"):
+            prefix = prefix.removesuffix("_mem_wrap")
 
         def discover_extra_files(base_dir, exclude_name, mod_name, custom_lib_dir=None, find_syn=False):
             # Cache rglob results to avoid scanning disk multiple times for different instances
